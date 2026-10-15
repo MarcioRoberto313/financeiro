@@ -1,12 +1,14 @@
-// Banco de desenvolvimento em SQLite. Para produção, troque o provider para
-// "postgresql" (ex.: Supabase) e aponte DATABASE_URL para o servidor.
+// PostgreSQL (Supabase).
+// DATABASE_URL: conexão com pool (porta 6543), usada pelo app.
+// DIRECT_URL:   conexão direta (porta 5432), usada pelo `prisma db push`.
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // Valores monetários são guardados em centavos (Int) para evitar erro de arredondamento.
