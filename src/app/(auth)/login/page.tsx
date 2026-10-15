@@ -1,0 +1,35 @@
+"use client";
+
+import Link from "next/link";
+import { useActionState } from "react";
+import { login } from "@/app/actions";
+
+export default function LoginPage() {
+  const [state, action, pending] = useActionState(login, undefined);
+  return (
+    <form action={action} className="card space-y-4">
+      <div>
+        <h1 className="text-xl font-semibold">Entrar</h1>
+        <p className="text-sm text-muted">Acompanhe seu orçamento, DRE e metas.</p>
+      </div>
+      <div>
+        <label className="label" htmlFor="email">E-mail</label>
+        <input className="input" id="email" name="email" type="email" autoComplete="email" required />
+      </div>
+      <div>
+        <label className="label" htmlFor="password">Senha</label>
+        <input className="input" id="password" name="password" type="password" autoComplete="current-password" required />
+      </div>
+      {state?.error && <p className="text-sm text-negative">{state.error}</p>}
+      <button className="btn btn-primary w-full" disabled={pending}>
+        {pending ? "Entrando…" : "Entrar"}
+      </button>
+      <p className="text-center text-sm text-muted">
+        Não tem conta?{" "}
+        <Link href="/cadastro" className="font-medium text-primary">
+          Criar conta
+        </Link>
+      </p>
+    </form>
+  );
+}

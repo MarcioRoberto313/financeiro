@@ -1,0 +1,121 @@
+// Banco de desenvolvimento em SQLite. Para produção, troque o provider para
+// "postgresql" (ex.: Supabase) e aponte DATABASE_URL para o servidor.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Valores monetários são guardados em centavos (Int) para evitar erro de arredondamento.
+
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  accounts     Account[]
+  categories   Category[]
+  transactions Transaction[]
+  budgets      Budget[]
+  goals        Goal[]
+}
+
+// type: CORRENTE | POUPANCA | CARTAO | CARTEIRA | INVESTIMENTO
+model Account {
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  type           String        @default("CORRENTE")
+  initialBalance Int           @default(0)
+  color          String        @default("#6366f1")
+  archived       Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  transactions   Transaction[]
+
+  @@index([userId])
+}
+
+// kind:  RECEITA | DESPESA
+// group: linha da DRE -> RECEITA | FIXA | VARIAVEL | DIVIDA | INVESTIMENTO
+model Category {
+  id           String        @id @default(cuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  kind         String
+  group        String
+  color        String        @default("#64748b")
+  archived     Boolean       @default(false)
+  transactions Transaction[]
+  budgets      Budget[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+// amount com sinal: > 0 entrada, < 0 saída.
+model Transaction {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId   String
+  account     Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  date        DateTime
+  description String
+  amount      Int
+  notes       String?
+  fitId       String? // identificador do OFX, evita importar o mesmo lançamento duas vezes
+  importBatch String?
+  createdAt   DateTime  @default(now())
+
+  @@unique([accountId, fitId])
+  @@index([userId, date])
+  @@index([categoryId])
+}
+
+// Valor orçado (positivo) por categoria e mês.
+model Budget {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  year       Int
+  month      Int // 1..12
+  amount     Int
+
+  @@unique([userId, categoryId, year, month])
+  @@index([userId, year])
+}
+
+model Goal {
+  id            String             @id @default(cuid())
+  userId        String
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  targetAmount  Int
+  deadline      DateTime?
+  color         String             @default("#10b981")
+  createdAt     DateTime           @default(now())
+  contributions GoalContribution[]
+
+  @@index([userId])
+}
+
+model GoalContribution {
+  id     String   @id @default(cuid())
+  goalId String
+  goal   Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  date   DateTime
+  amount Int // pode ser negativo (resgate)
+  note   String?
+
+  @@index([goalId])
+}
