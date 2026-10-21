@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { APP_NAME, POLICY_UPDATED_AT, contactEmail } from "@/lib/site";
+import { APP_NAME, POLICY_UPDATED_AT, contactEmail, contactWhatsapp } from "@/lib/site";
 
 export const metadata = { title: "Política de privacidade" };
 
 export default function PrivacidadePage() {
   const email = contactEmail();
+  const whatsapp = contactWhatsapp(`Olá! Tenho uma dúvida sobre privacidade no ${APP_NAME}.`);
   return (
     <>
       <h1>Política de privacidade</h1>
@@ -80,14 +81,28 @@ export default function PrivacidadePage() {
       </ul>
 
       <h2>7. Contato</h2>
-      <p>
-        Dúvidas ou pedidos sobre privacidade:{" "}
-        {email ? (
-          <a href={`mailto:${email}`} className="text-primary underline">{email}</a>
-        ) : (
-          "pelo e-mail de suporte informado na página do aplicativo."
-        )}
-      </p>
+      {email || whatsapp ? (
+        <>
+          <p>Dúvidas ou pedidos sobre privacidade:</p>
+          <ul>
+            {email && (
+              <li>
+                E-mail: <a href={`mailto:${email}`} className="text-primary underline">{email}</a>
+              </li>
+            )}
+            {whatsapp && (
+              <li>
+                WhatsApp:{" "}
+                <a href={whatsapp.url} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                  {whatsapp.label}
+                </a>
+              </li>
+            )}
+          </ul>
+        </>
+      ) : (
+        <p>Dúvidas ou pedidos sobre privacidade: pelo contato de suporte informado na página do aplicativo.</p>
+      )}
 
       <h2>8. Mudanças nesta política</h2>
       <p>Se esta política mudar, a data de “última atualização” no topo será alterada.</p>
