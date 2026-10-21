@@ -8,7 +8,18 @@ import { GROUP_LABEL, GROUP_ORDER, TRANSFER, type CategoryKind, type DreGroup } 
 import { Modal } from "./modal";
 
 export type Option = { id: string; name: string };
-export type CategoryOption = Option & { kind: CategoryKind; group: DreGroup | typeof TRANSFER };
+export type CategoryOption = Option & { kind: CategoryKind; group: DreGroup | typeof TRANSFER; parentId: string | null };
+
+/** Categoria seguida das suas subcategorias, com o nome das filhas recuado. */
+export function categoryTreeOptions(categories: CategoryOption[]) {
+  const ids = new Set(categories.map((c) => c.id));
+  return categories
+    .filter((c) => !c.parentId || !ids.has(c.parentId))
+    .flatMap((p) => [
+      { ...p, label: p.name },
+      ...categories.filter((c) => c.parentId === p.id).map((c) => ({ ...c, label: `   ↳ ${c.name}` })),
+    ]);
+}
 export type TxValue = {
   id: string;
   date: string;
@@ -40,6 +51,7 @@ function CategorySelect({
     TRANSFER,
   ] as const;
   const label = (g: (typeof groups)[number]) => (g === TRANSFER ? "Transferências (fora da DRE)" : GROUP_LABEL[g]);
+  const tree = categoryTreeOptions(categories);
   return (
     <select
       name={name}
@@ -50,11 +62,11 @@ function CategorySelect({
       <option value="">Sem categoria</option>
       {groups.map((g) => (
         <optgroup key={g} label={label(g)}>
-          {categories
+          {tree
             .filter((c) => c.group === g)
             .map((c) => (
               <option key={c.id} value={c.id}>
-                {c.name}
+                {c.label}
               </option>
             ))}
         </optgroup>

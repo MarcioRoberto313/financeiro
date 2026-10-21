@@ -38,7 +38,14 @@ async function Acompanhamento({ searchParams }: { searchParams: SearchParams }) 
   const groups = GROUP_ORDER.map((g) => {
     const cats = matrix.categories
       .filter((c) => c.group === g)
-      .map((c) => ({ ...c, orcado: pick(matrix.budget(c.id)), realizado: pick(matrix.actual(c.id)) }))
+      .map((c) => ({
+        ...c,
+        orcado: pick(matrix.budget(c.id)),
+        realizado: pick(matrix.actual(c.id)),
+        subs: (c.children ?? [])
+          .map((s) => ({ ...s, orcado: pick(matrix.budget(s.id)), realizado: pick(matrix.actual(s.id)) }))
+          .filter((s) => s.orcado || s.realizado),
+      }))
       .filter((c) => c.orcado || c.realizado);
     return {
       group: g,
@@ -55,9 +62,11 @@ async function Acompanhamento({ searchParams }: { searchParams: SearchParams }) 
   const resOrc = rec.orcado - despOrc;
   const resReal = rec.realizado - despReal;
 
+  // Estouros no nível mais detalhado: subcategoria quando existir, senão a categoria
   const estouros = groups
     .filter((g) => g.group !== "RECEITA")
     .flatMap((g) => g.cats)
+    .flatMap((c) => (c.subs.length ? c.subs.map((s) => ({ ...s, name: `${c.name} › ${s.name}` })) : [c]))
     .filter((c) => c.orcado > 0 && c.realizado > c.orcado)
     .sort((a, b) => b.realizado - b.orcado - (a.realizado - a.orcado));
 
@@ -181,28 +190,31 @@ async function Acompanhamento({ searchParams }: { searchParams: SearchParams }) 
                     <td className="num">{g.orcado ? pct(g.realizado / g.orcado) : "—"}</td>
                     <td />
                   </tr>,
-                  ...g.cats.map((c) => {
-                    const ratio = c.orcado ? c.realizado / c.orcado : c.realizado ? 2 : 0;
-                    const over = !isRec && ratio > 1;
-                    return (
-                      <tr key={c.id}>
-                        <td>
-                          <span className="flex items-center gap-2 pl-3">
-                            <Dot color={c.color} />
-                            {c.name}
-                          </span>
-                        </td>
-                        <td className="num text-muted">{money(c.orcado)}</td>
-                        <td className="num">{money(c.realizado)}</td>
-                        <td className="num">
-                          <Signed cents={c.realizado - c.orcado} favorable={isRec ? c.realizado >= c.orcado : c.realizado <= c.orcado} />
-                        </td>
-                        <td className={`num ${over ? "font-medium text-negative" : ""}`}>{c.orcado ? pct(ratio) : "sem orçamento"}</td>
-                        <td>
-                          <Progress value={ratio} color={c.color} over={over} />
-                        </td>
-                      </tr>
-                    );
+                  ...g.cats.flatMap((c) => {
+                    const line = (r: { id: string; name: string; color: string; orcado: number; realizado: number }, sub: boolean) => {
+                      const ratio = r.orcado ? r.realizado / r.orcado : r.realizado ? 2 : 0;
+                      const over = !isRec && ratio > 1;
+                      return (
+                        <tr key={r.id} className={sub ? "text-xs" : c.subs.length ? "font-medium" : ""}>
+                          <td>
+                            <span className={`flex items-center gap-2 ${sub ? "pl-9 text-muted" : "pl-3"}`}>
+                              {sub ? <span className="h-1.5 w-1.5 rounded-full" style={{ background: r.color }} /> : <Dot color={r.color} />}
+                              {r.name}
+                            </span>
+                          </td>
+                          <td className="num text-muted">{money(r.orcado)}</td>
+                          <td className="num">{money(r.realizado)}</td>
+                          <td className="num">
+                            <Signed cents={r.realizado - r.orcado} favorable={isRec ? r.realizado >= r.orcado : r.realizado <= r.orcado} />
+                          </td>
+                          <td className={`num ${over ? "font-medium text-negative" : ""}`}>{r.orcado ? pct(ratio) : "sem orçamento"}</td>
+                          <td>
+                            <Progress value={ratio} color={r.color} over={over} />
+                          </td>
+                        </tr>
+                      );
+                    };
+                    return [line(c, false), ...c.subs.map((s) => line(s, true))];
                   }),
                 ];
               })}

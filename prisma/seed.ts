@@ -2,7 +2,7 @@
 // Login: demo@financeiro.test  |  Senha: demo1234
 import { PrismaClient, type Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import { DEFAULT_CATEGORIES } from "../src/lib/constants";
+import { createDefaultCategories } from "../src/lib/default-categories";
 
 const db = new PrismaClient();
 
@@ -18,11 +18,7 @@ async function main() {
     data: { name: "Usuário Demo", email: "demo@financeiro.test", passwordHash: await bcrypt.hash("demo1234", 10) },
   });
 
-  const cats = Object.fromEntries(
-    await Promise.all(
-      DEFAULT_CATEGORIES.map(async (c) => [c.name, (await db.category.create({ data: { ...c, userId: user.id } })).id]),
-    ),
-  ) as Record<string, string>;
+  const cats = await createDefaultCategories(db, user.id);
 
   const corrente = await db.account.create({
     data: { userId: user.id, name: "Nubank", type: "CORRENTE", initialBalance: 350000, color: "#8b5cf6" },
@@ -37,20 +33,23 @@ async function main() {
   // Recorrências mensais: [categoria, descrição, valor em centavos (com sinal), dia, conta]
   const monthly: [string, string, number, number, string][] = [
     ["Salário", "Salário", 850000, 5, corrente.id],
-    ["Moradia", "Aluguel", -220000, 10, corrente.id],
-    ["Contas da casa", "Energia elétrica", -24000, 15, corrente.id],
-    ["Contas da casa", "Internet", -11990, 12, corrente.id],
-    ["Saúde", "Plano de saúde", -68000, 8, corrente.id],
+    ["Aluguel", "Aluguel", -220000, 10, corrente.id],
+    ["Condomínio", "Condomínio", -65000, 10, corrente.id],
+    ["Energia elétrica", "Energia elétrica", -24000, 15, corrente.id],
+    ["Internet", "Internet", -11990, 12, corrente.id],
+    ["Gás", "Conta de gás", -8500, 16, corrente.id],
+    ["Plano de saúde", "Plano de saúde", -68000, 8, corrente.id],
     ["Educação", "Curso de inglês", -42000, 7, corrente.id],
     ["Assinaturas", "Streaming", -5590, 18, cartao.id],
     ["Financiamentos", "Parcela do carro", -98000, 20, corrente.id],
     ["Aportes", "Aporte reserva", -80000, 6, corrente.id],
   ];
-  const variable: [string, string[], number, number][] = [
-    ["Alimentação", ["Supermercado", "Padaria", "iFood", "Restaurante"], 18000, 7],
-    ["Transporte", ["Combustível", "Uber", "Estacionamento"], 15000, 4],
-    ["Lazer", ["Cinema", "Bar", "Show"], 12000, 2],
-    ["Compras", ["Amazon", "Farmácia", "Loja de roupas"], 16000, 2],
+  // Gastos variáveis: [descrições possíveis → (sub)categoria], valor médio, quantidade no mês
+  const variable: [Record<string, string>, number, number][] = [
+    [{ Supermercado: "Supermercado", Padaria: "Supermercado", iFood: "Delivery", Restaurante: "Restaurantes" }, 18000, 7],
+    [{ Combustível: "Combustível", Uber: "App de transporte", Estacionamento: "Transporte" }, 15000, 4],
+    [{ Cinema: "Lazer", Bar: "Lazer", Show: "Lazer" }, 12000, 2],
+    [{ Amazon: "Compras", Farmácia: "Farmácia", "Loja de roupas": "Compras" }, 16000, 2],
   ];
 
   const txs: Prisma.TransactionCreateManyInput[] = [];
@@ -62,18 +61,20 @@ async function main() {
     const lastDay = i === 0 ? today.getUTCDate() : 28;
     for (const [cat, desc, amount, d, acc] of monthly) {
       if (d > lastDay) continue;
-      const value = cat === "Contas da casa" && desc === "Energia elétrica" ? -vary(-amount, 0.25) : amount;
+      const value = cat === "Energia elétrica" || cat === "Gás" ? -vary(-amount, 0.25) : amount;
       txs.push({ userId: user.id, accountId: acc, categoryId: cats[cat], date: day(y, m, d), description: desc, amount: value });
     }
-    for (const [cat, descs, avg, count] of variable) {
+    for (const [descs, avg, count] of variable) {
+      const names = Object.keys(descs);
       for (let k = 0; k < count; k++) {
         const d = 1 + Math.floor(rnd() * lastDay);
+        const desc = names[Math.floor(rnd() * names.length)];
         txs.push({
           userId: user.id,
           accountId: rnd() > 0.5 ? cartao.id : corrente.id,
-          categoryId: cats[cat],
+          categoryId: cats[descs[desc]],
           date: day(y, m, d),
-          description: descs[Math.floor(rnd() * descs.length)],
+          description: desc,
           amount: -vary(avg, 0.6),
         });
       }
@@ -100,8 +101,11 @@ async function main() {
   const year = today.getUTCFullYear();
   const plan: Record<string, number> = {
     "Salário": 850000, "Renda extra": 50000, "Rendimentos": 14000,
-    "Moradia": 220000, "Contas da casa": 36000, "Saúde": 68000, "Educação": 42000, "Assinaturas": 6000,
-    "Alimentação": 110000, "Transporte": 55000, "Lazer": 25000, "Compras": 30000, "Outros": 10000,
+    "Aluguel": 220000, "Condomínio": 65000, "Energia elétrica": 24000, "Internet": 12000, "Gás": 9000,
+    "Plano de saúde": 68000, "Farmácia": 8000, "Educação": 42000, "Assinaturas": 6000,
+    "Supermercado": 70000, "Delivery": 20000, "Restaurantes": 25000,
+    "Combustível": 30000, "App de transporte": 15000, "Transporte": 8000,
+    "Lazer": 25000, "Compras": 25000, "Outros": 10000,
     "Financiamentos": 98000, "Aportes": 100000,
   };
   await db.budget.createMany({

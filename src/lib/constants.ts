@@ -25,18 +25,44 @@ export const ACCOUNT_TYPES: Record<string, string> = {
   INVESTIMENTO: "Investimento",
 };
 
-export const DEFAULT_CATEGORIES: { name: string; kind: CategoryKind; group: DreGroup | typeof TRANSFER; color: string }[] = [
+export type DefaultCategory = {
+  name: string;
+  kind: CategoryKind;
+  group: DreGroup | typeof TRANSFER;
+  color: string;
+  children?: string[];
+};
+
+/** Categorias criadas para cada novo usuário; `children` viram subcategorias. */
+export const DEFAULT_CATEGORIES: DefaultCategory[] = [
   { name: "Transferência entre contas", kind: TRANSFER, group: TRANSFER, color: "#94a3b8" },
   { name: "Salário", kind: "RECEITA", group: "RECEITA", color: "#10b981" },
   { name: "Renda extra", kind: "RECEITA", group: "RECEITA", color: "#34d399" },
   { name: "Rendimentos", kind: "RECEITA", group: "RECEITA", color: "#6ee7b7" },
-  { name: "Moradia", kind: "DESPESA", group: "FIXA", color: "#6366f1" },
-  { name: "Contas da casa", kind: "DESPESA", group: "FIXA", color: "#818cf8" },
-  { name: "Saúde", kind: "DESPESA", group: "FIXA", color: "#0ea5e9" },
+  {
+    name: "Moradia",
+    kind: "DESPESA",
+    group: "FIXA",
+    color: "#6366f1",
+    children: ["Aluguel", "Condomínio", "IPTU", "Energia elétrica", "Água", "Gás", "Internet"],
+  },
+  { name: "Saúde", kind: "DESPESA", group: "FIXA", color: "#0ea5e9", children: ["Plano de saúde", "Farmácia", "Consultas"] },
   { name: "Educação", kind: "DESPESA", group: "FIXA", color: "#38bdf8" },
   { name: "Assinaturas", kind: "DESPESA", group: "FIXA", color: "#a78bfa" },
-  { name: "Alimentação", kind: "DESPESA", group: "VARIAVEL", color: "#f59e0b" },
-  { name: "Transporte", kind: "DESPESA", group: "VARIAVEL", color: "#f97316" },
+  {
+    name: "Alimentação",
+    kind: "DESPESA",
+    group: "VARIAVEL",
+    color: "#f59e0b",
+    children: ["Supermercado", "Restaurantes", "Delivery"],
+  },
+  {
+    name: "Transporte",
+    kind: "DESPESA",
+    group: "VARIAVEL",
+    color: "#f97316",
+    children: ["Combustível", "App de transporte", "Manutenção"],
+  },
   { name: "Lazer", kind: "DESPESA", group: "VARIAVEL", color: "#ec4899" },
   { name: "Compras", kind: "DESPESA", group: "VARIAVEL", color: "#f43f5e" },
   { name: "Outros", kind: "DESPESA", group: "VARIAVEL", color: "#94a3b8" },

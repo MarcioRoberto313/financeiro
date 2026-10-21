@@ -58,8 +58,11 @@ async function Dre({ searchParams }: { searchParams: SearchParams }) {
   );
 }
 
+/** Categorias do grupo, cada uma seguida das suas subcategorias (sub = true). */
 function categoryRows(matrix: YearMatrix, line: DreLine) {
-  return matrix.categories.filter((c) => c.group === line.group);
+  return matrix.categories
+    .filter((c) => c.group === line.group)
+    .flatMap((c) => [{ ...c, sub: false }, ...(c.children ?? []).map((s) => ({ ...s, sub: true }))]);
 }
 
 function Mensal({ matrix, source }: { matrix: YearMatrix; source: "actual" | "budget" }) {
@@ -102,8 +105,8 @@ function Mensal({ matrix, source }: { matrix: YearMatrix; source: "actual" | "bu
                       const ct = total(vals);
                       if (!ct) return null;
                       return (
-                        <tr key={`${line.key}-${c.id}`} className="text-muted">
-                          <td className="sticky left-0 z-10 bg-surface pl-6">{c.name}</td>
+                        <tr key={`${line.key}-${c.id}`} className={c.sub ? "text-muted/80 text-[11px]" : "text-muted"}>
+                          <td className={`sticky left-0 z-10 bg-surface ${c.sub ? "pl-10" : "pl-6"}`}>{c.sub ? `↳ ${c.name}` : c.name}</td>
                           {vals.map((v, i) => (
                             <td key={i} className="num">
                               {v ? money(v) : "–"}
@@ -175,8 +178,8 @@ function ComparativoBlock({ matrix, upto, title }: { matrix: YearMatrix; upto: n
                       const co = total(matrix.budget(c.id), upto);
                       if (!cr && !co) return null;
                       return (
-                        <tr key={`${line.key}-${c.id}`} className="text-sm">
-                          <td className="pl-6 text-muted">{c.name}</td>
+                        <tr key={`${line.key}-${c.id}`} className={c.sub ? "text-xs" : "text-sm"}>
+                          <td className={`text-muted ${c.sub ? "pl-10" : "pl-6"}`}>{c.sub ? `↳ ${c.name}` : c.name}</td>
                           <td className="num text-muted">{money(co)}</td>
                           <td className="num">{money(cr)}</td>
                           <td className="num">

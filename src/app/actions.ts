@@ -6,7 +6,8 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { createSession, deleteSession, requireUserId } from "@/lib/session";
-import { DEFAULT_CATEGORIES, GROUP_ORDER, TRANSFER, type DreGroup } from "@/lib/constants";
+import { GROUP_ORDER, TRANSFER, type DreGroup } from "@/lib/constants";
+import { createDefaultCategories } from "@/lib/default-categories";
 import { dateFromISO, parseMoney } from "@/lib/format";
 
 export type FormState = { error?: string; ok?: boolean; message?: string } | undefined;
@@ -43,10 +44,10 @@ export async function register(_: FormState, formData: FormData): Promise<FormSt
       name,
       email,
       passwordHash: await bcrypt.hash(password, 10),
-      categories: { create: DEFAULT_CATEGORIES },
       accounts: { create: [{ name: "Conta principal", type: "CORRENTE" }] },
     },
   });
+  await createDefaultCategories(db, user.id);
   await createSession(user.id);
   redirect("/dashboard");
 }
@@ -305,17 +306,37 @@ export async function saveCategory(_: FormState, formData: FormData): Promise<Fo
   const userId = await requireUserId();
   const id = String(formData.get("id") ?? "");
   const name = String(formData.get("name") ?? "").trim();
-  const group = String(formData.get("group") ?? "VARIAVEL");
-  const color = String(formData.get("color") ?? "#64748b");
-  if (!name) return { error: "Informe o nome da categoria." };
+  const parentId = String(formData.get("parentId") ?? "") || null;
+  let group = String(formData.get("group") ?? "VARIAVEL");
+  let color = String(formData.get("color") ?? "#64748b");
+  if (!name) return { error: "Informe o nome." };
+
+  if (parentId) {
+    // Subcategoria: herda grupo da DRE da categoria pai (só existem dois níveis)
+    const parent = await db.category.findFirst({ where: { id: parentId, userId, parentId: null } });
+    if (!parent) return { error: "Categoria principal não encontrada." };
+    if (id && (await db.category.count({ where: { parentId: id } })) > 0) {
+      return { error: "Esta categoria tem subcategorias e não pode virar subcategoria." };
+    }
+    group = parent.group;
+    if (!formData.get("color")) color = parent.color;
+  }
   if (![...GROUP_ORDER, TRANSFER].includes(group as DreGroup)) return { error: "Grupo inválido." };
   const kind = group === "RECEITA" ? "RECEITA" : group === TRANSFER ? TRANSFER : "DESPESA";
-  const data = { name, group, color, kind };
-  try {
-    if (id) await db.category.updateMany({ where: { id, userId }, data });
-    else await db.category.create({ data: { ...data, userId } });
-  } catch {
-    return { error: "Já existe uma categoria com esse nome." };
+
+  const duplicate = await db.category.findFirst({
+    where: { userId, parentId, name: { equals: name, mode: "insensitive" }, ...(id ? { NOT: { id } } : {}) },
+  });
+  if (duplicate) return { error: parentId ? "Já existe uma subcategoria com esse nome aqui." : "Já existe uma categoria com esse nome." };
+
+  const data = { name, group, color, kind, parentId };
+  if (id) {
+    const res = await db.category.updateMany({ where: { id, userId }, data });
+    if (res.count === 0) return { error: "Categoria não encontrada." };
+    // Mudou o grupo da categoria: as subcategorias acompanham
+    await db.category.updateMany({ where: { parentId: id, userId }, data: { group, kind } });
+  } else {
+    await db.category.create({ data: { ...data, userId } });
   }
   refreshAll();
   return { ok: true };

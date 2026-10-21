@@ -1,10 +1,10 @@
 import { Suspense } from "react";
 import { requireUser } from "@/lib/session";
-import { getYearMatrix } from "@/lib/data";
+import { getYearMatrix, type CategoryRow } from "@/lib/data";
 import { getPeriod, type SearchParams } from "@/lib/period";
 import { PageHeader, PageSkeleton } from "@/components/ui";
 import { PeriodPicker } from "@/components/period-picker";
-import { BudgetEditor } from "@/components/budget-editor";
+import { BudgetEditor, type BudgetCat } from "@/components/budget-editor";
 
 export const metadata = { title: "Orçamento" };
 
@@ -20,8 +20,18 @@ async function Orcamento({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireUser();
   const { year, month } = getPeriod(await searchParams);
   const matrix = await getYearMatrix(user.id, year);
-  const categories = matrix.categories.filter((c) => !c.id.startsWith("__"));
-  const initial = Object.fromEntries(categories.map((c) => [c.id, matrix.budget(c.id)]));
+  // Só dados simples vão para o componente do navegador (sem as funções da matriz)
+  const toCat = (c: CategoryRow): BudgetCat => ({
+    id: c.id,
+    name: c.name,
+    group: c.group,
+    color: c.color,
+    children: (c.children ?? []).map(toCat),
+  });
+  const categories = matrix.categories.filter((c) => !c.id.startsWith("__")).map(toCat);
+  const initial = Object.fromEntries(
+    categories.flatMap((c) => [c, ...c.children]).map((c) => [c.id, matrix.budget(c.id)]),
+  );
 
   return (
     <>

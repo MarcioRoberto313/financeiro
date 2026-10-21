@@ -8,7 +8,13 @@ import { formatDate, money, toISODate } from "@/lib/format";
 import { Dot, PageHeader, PageSkeleton, StatCard } from "@/components/ui";
 import { PeriodPicker } from "@/components/period-picker";
 import { UrlSearch, UrlSelect } from "@/components/url-filters";
-import { InlineCategory, NewTransactionButton, TransactionRowActions, type TxValue } from "@/components/transaction-form";
+import {
+  InlineCategory,
+  NewTransactionButton,
+  TransactionRowActions,
+  categoryTreeOptions,
+  type TxValue,
+} from "@/components/transaction-form";
 
 export const metadata = { title: "Lançamentos" };
 
@@ -32,7 +38,7 @@ async function Lancamentos({ searchParams }: { searchParams: SearchParams }) {
   ]);
 
   const accountOpts = accounts.filter((a) => !a.archived).map((a) => ({ id: a.id, name: a.name }));
-  const catOpts = categories.map((c) => ({ id: c.id, name: c.name, kind: c.kind, group: c.group }));
+  const catOpts = categories.map((c) => ({ id: c.id, name: c.name, kind: c.kind, group: c.group, parentId: c.parentId }));
   const entradas = txs.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const saidas = txs.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0);
   const semCategoria = txs.filter((t) => !t.categoryId).length;
@@ -80,7 +86,7 @@ async function Lancamentos({ searchParams }: { searchParams: SearchParams }) {
             value={filters.categoria}
             current={current}
             placeholder="Todas as categorias"
-            options={[{ value: "none", label: "— Sem categoria —" }, ...categories.map((c) => ({ value: c.id, label: c.name }))]}
+            options={[{ value: "none", label: "— Sem categoria —" }, ...categoryTreeOptions(catOpts).map((c) => ({ value: c.id, label: c.label }))]}
           />
         </div>
         <div className="overflow-x-auto">

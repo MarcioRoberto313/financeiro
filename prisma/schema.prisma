@@ -42,12 +42,17 @@ model Account {
   @@index([userId])
 }
 
-// kind:  RECEITA | DESPESA
-// group: linha da DRE -> RECEITA | FIXA | VARIAVEL | DIVIDA | INVESTIMENTO
+// kind:  RECEITA | DESPESA | TRANSFERENCIA
+// group: linha da DRE -> RECEITA | FIXA | VARIAVEL | DIVIDA | INVESTIMENTO | TRANSFERENCIA
+// Dois níveis: categoria (parentId nulo) e subcategoria (parentId = categoria).
+// A subcategoria guarda uma cópia do kind/group da categoria pai.
 model Category {
   id           String        @id @default(cuid())
   userId       String
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentId     String?
+  parent       Category?     @relation("Subcategorias", fields: [parentId], references: [id], onDelete: Cascade)
+  children     Category[]    @relation("Subcategorias")
   name         String
   kind         String
   group        String
@@ -56,8 +61,8 @@ model Category {
   transactions Transaction[]
   budgets      Budget[]
 
-  @@unique([userId, name])
   @@index([userId])
+  @@index([parentId])
 }
 
 // amount com sinal: > 0 entrada, < 0 saída.

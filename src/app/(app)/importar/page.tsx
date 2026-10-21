@@ -26,7 +26,7 @@ async function ImportContent() {
   return (
     <Importer
       accounts={accounts.filter((a) => !a.archived).map((a) => ({ id: a.id, name: a.name }))}
-      categories={categories.map((c) => ({ id: c.id, name: c.name, kind: c.kind, group: c.group }))}
+      categories={categories.map((c) => ({ id: c.id, name: c.name, kind: c.kind, group: c.group, parentId: c.parentId }))}
     />
   );
 }

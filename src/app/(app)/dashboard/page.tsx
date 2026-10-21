@@ -196,7 +196,7 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{t.description}</p>
                   <p className="text-xs text-muted">
-                    {formatDate(t.date)} · {t.category?.name ?? "Sem categoria"} · {t.account.name}
+                    {formatDate(t.date)} · {t.category ? (t.category.parent ? `${t.category.parent.name} › ${t.category.name}` : t.category.name) : "Sem categoria"} · {t.account.name}
                   </p>
                 </div>
                 <span className={`tabular-nums ${t.amount >= 0 ? "text-positive" : ""}`}>{money(t.amount)}</span>

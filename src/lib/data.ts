@@ -11,12 +11,24 @@ export type CategoryRow = {
   group: DreGroup;
   color: string;
   archived?: boolean;
+  parentId?: string | null;
+  /** Subcategorias (só nas linhas de categoria da matriz). */
+  children?: CategoryRow[];
 };
 
-export type AnyCategory = Omit<CategoryRow, "kind" | "group"> & { kind: CategoryKind; group: DreGroup | typeof TRANSFER };
+export type AnyCategory = Omit<CategoryRow, "kind" | "group" | "children"> & {
+  kind: CategoryKind;
+  group: DreGroup | typeof TRANSFER;
+  parentId: string | null;
+};
 
 const UNCAT_IN = "__sem_categoria_entrada";
 const UNCAT_OUT = "__sem_categoria_saida";
+/**
+ * Sufixo da linha "sem subcategoria": valores lançados direto numa categoria que tem
+ * subcategorias (ex.: lançamentos feitos em "Moradia" antes de criar "Condomínio").
+ */
+export const GENERAL = "::geral";
 
 export async function getCategories(userId: string, includeArchived = false): Promise<AnyCategory[]> {
   const rows = await db.category.findMany({
@@ -30,10 +42,19 @@ export async function getCategories(userId: string, includeArchived = false): Pr
     group: c.group as AnyCategory["group"],
     color: c.color,
     archived: c.archived,
+    parentId: c.parentId,
   }));
 }
 
-const isDreCategory = (c: AnyCategory): c is CategoryRow => c.group !== TRANSFER;
+/** Categorias em ordem de exibição: cada categoria seguida das suas subcategorias. */
+export function sortAsTree<T extends { id: string; parentId: string | null }>(list: T[]): T[] {
+  const ids = new Set(list.map((c) => c.id));
+  const top = list.filter((c) => !c.parentId || !ids.has(c.parentId));
+  return top.flatMap((p) => [p, ...list.filter((c) => c.parentId === p.id)]);
+}
+
+type DreCategory = Omit<AnyCategory, "kind" | "group"> & { kind: "RECEITA" | "DESPESA"; group: DreGroup };
+const isDreCategory = (c: AnyCategory): c is DreCategory => c.group !== TRANSFER;
 
 export async function getAccountsWithBalance(userId: string) {
   const [accounts, sums] = await Promise.all([
@@ -49,7 +70,8 @@ const zeros = () => Array.from({ length: 12 }, () => 0);
 /**
  * Matriz do ano: para cada categoria, 12 meses de realizado e orçado (valores positivos
  * na "direção natural" da categoria: receita recebida, despesa gasta).
- * Lançamentos sem categoria entram em duas linhas virtuais.
+ * `categories` traz só as categorias de primeiro nível, já somando as subcategorias,
+ * que ficam em `children`. Lançamentos sem categoria entram em duas linhas virtuais.
  */
 export async function getYearMatrix(userId: string, year: number) {
   const [allCategories, txs, budgets] = await Promise.all([
@@ -87,9 +109,42 @@ export async function getYearMatrix(userId: string, year: number) {
   }
 
   // Categorias arquivadas só aparecem se tiverem movimento ou orçamento no ano.
-  const rows: CategoryRow[] = categories.filter((c) => !c.archived || actual[c.id] || budget[c.id]);
-  if (hasUncatIn) rows.push({ id: UNCAT_IN, name: "Entradas sem categoria", kind: "RECEITA", group: "RECEITA", color: "#cbd5e1" });
-  if (hasUncatOut) rows.push({ id: UNCAT_OUT, name: "Saídas sem categoria", kind: "DESPESA", group: "VARIAVEL", color: "#cbd5e1" });
+  const visible = (c: CategoryRow) => !c.archived || !!actual[c.id] || !!budget[c.id];
+  const add = (target: Record<string, number[]>, key: string, vals?: number[]) => {
+    if (!vals) return;
+    const arr = (target[key] ??= zeros());
+    for (let i = 0; i < 12; i++) arr[i] += vals[i];
+  };
+  const ids = new Set(categories.map((c) => c.id));
+  const rows: CategoryRow[] = [];
+  for (const p of categories.filter((c) => !c.parentId || !ids.has(c.parentId))) {
+    const kids = categories.filter((c) => c.parentId === p.id && visible(c));
+    if (!kids.length) {
+      if (visible(p)) rows.push({ ...p, children: [] });
+      continue;
+    }
+    const children: CategoryRow[] = kids.map((k) => ({ ...k, children: [] }));
+    // Valores lançados direto na categoria viram a linha "sem subcategoria"
+    const generalKey = p.id + GENERAL;
+    if (actual[p.id] || budget[p.id]) {
+      add(actual, generalKey, actual[p.id]);
+      add(budget, generalKey, budget[p.id]);
+      children.push({ ...p, id: generalKey, name: "Sem subcategoria", parentId: p.id, children: [] });
+    }
+    // O total da categoria passa a ser a soma das linhas filhas
+    const total = { actual: zeros(), budget: zeros() };
+    for (const c of children) {
+      for (let i = 0; i < 12; i++) {
+        total.actual[i] += actual[c.id]?.[i] ?? 0;
+        total.budget[i] += budget[c.id]?.[i] ?? 0;
+      }
+    }
+    actual[p.id] = total.actual;
+    budget[p.id] = total.budget;
+    rows.push({ ...p, children });
+  }
+  if (hasUncatIn) rows.push({ id: UNCAT_IN, name: "Entradas sem categoria", kind: "RECEITA", group: "RECEITA", color: "#cbd5e1", children: [] });
+  if (hasUncatOut) rows.push({ id: UNCAT_OUT, name: "Saídas sem categoria", kind: "DESPESA", group: "VARIAVEL", color: "#cbd5e1", children: [] });
 
   return {
     year,
@@ -141,6 +196,12 @@ export async function getMonthTransactions(
   month: number,
   filters: { accountId?: string; categoryId?: string; q?: string } = {},
 ) {
+  // Filtrar por uma categoria inclui as subcategorias dela
+  let categoryIds: string[] | undefined;
+  if (filters.categoryId && filters.categoryId !== "none") {
+    const kids = await db.category.findMany({ where: { userId, parentId: filters.categoryId }, select: { id: true } });
+    categoryIds = [filters.categoryId, ...kids.map((k) => k.id)];
+  }
   return db.transaction.findMany({
     where: {
       userId,
@@ -148,12 +209,12 @@ export async function getMonthTransactions(
       ...(filters.accountId ? { accountId: filters.accountId } : {}),
       ...(filters.categoryId === "none"
         ? { categoryId: null }
-        : filters.categoryId
-          ? { categoryId: filters.categoryId }
+        : categoryIds
+          ? { categoryId: { in: categoryIds } }
           : {}),
       ...(filters.q ? { description: { contains: filters.q } } : {}),
     },
-    include: { account: { select: { name: true, color: true } }, category: { select: { name: true, color: true } } },
+    include: { account: { select: { name: true, color: true } }, category: { select: { name: true, color: true, parent: { select: { name: true } } } } },
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   });
 }
