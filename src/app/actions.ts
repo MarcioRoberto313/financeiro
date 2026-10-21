@@ -469,7 +469,30 @@ export async function saveGoal(_: FormState, formData: FormData): Promise<FormSt
   const id = String(formData.get("id") ?? "");
   if (!name) return { error: "Informe o nome da meta." };
   if (!target || target <= 0) return { error: "Informe o valor da meta." };
-  const data = { name, targetAmount: target, color, deadline: deadline ? dateFromISO(deadline) : null };
+
+  // Origem do valor guardado: manual, saldo de uma conta ou lançamentos de uma categoria
+  const linkType = String(formData.get("linkType") ?? "MANUAL");
+  if (!["MANUAL", "ACCOUNT", "CATEGORY"].includes(linkType)) return { error: "Forma de alimentação inválida." };
+  const accountId = linkType === "ACCOUNT" ? String(formData.get("accountId") ?? "") : "";
+  const categoryId = linkType === "CATEGORY" ? String(formData.get("categoryId") ?? "") : "";
+  const startDate = String(formData.get("startDate") ?? "");
+  if (linkType === "ACCOUNT" && !(await db.account.findFirst({ where: { id: accountId, userId } }))) {
+    return { error: "Escolha a conta que alimenta a meta." };
+  }
+  if (linkType === "CATEGORY" && !(await db.category.findFirst({ where: { id: categoryId, userId } }))) {
+    return { error: "Escolha a categoria que alimenta a meta." };
+  }
+
+  const data = {
+    name,
+    targetAmount: target,
+    color,
+    deadline: deadline ? dateFromISO(deadline) : null,
+    linkType,
+    accountId: accountId || null,
+    categoryId: categoryId || null,
+    startDate: linkType === "CATEGORY" && startDate ? dateFromISO(startDate) : null,
+  };
   if (id) await db.goal.updateMany({ where: { id, userId }, data });
   else await db.goal.create({ data: { ...data, userId } });
   refreshAll();

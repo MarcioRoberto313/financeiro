@@ -115,16 +115,26 @@ async function main() {
   });
 
   // Metas
-  const reserva = await db.goal.create({
-    data: { userId: user.id, name: "Reserva de emergência", targetAmount: 3000000, color: "#10b981", deadline: day(year + 1, 6, 30) },
+  // Reserva: alimentada automaticamente pelos lançamentos da categoria "Reserva de emergência"
+  await db.goal.create({
+    data: {
+      userId: user.id,
+      name: "Reserva de emergência",
+      targetAmount: 3000000,
+      color: "#10b981",
+      deadline: day(year + 1, 6, 30),
+      linkType: "CATEGORY",
+      categoryId: cats["Reserva de emergência"],
+      startDate: new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 11, 1, 12)),
+    },
   });
+  // Viagem: aportes manuais registrados na própria meta
   const viagem = await db.goal.create({
     data: { userId: user.id, name: "Viagem de férias", targetAmount: 1200000, color: "#6366f1", deadline: day(year + 1, 1, 15) },
   });
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 5; i++) {
     const ref = new Date(Date.UTC(year, today.getUTCMonth() - i, 6, 12));
-    await db.goalContribution.create({ data: { goalId: reserva.id, date: ref, amount: 80000 } });
-    if (i < 5) await db.goalContribution.create({ data: { goalId: viagem.id, date: ref, amount: 60000 } });
+    await db.goalContribution.create({ data: { goalId: viagem.id, date: ref, amount: 60000 } });
   }
 
   console.log(`Seed ok: ${txs.length} lançamentos para ${user.email}`);

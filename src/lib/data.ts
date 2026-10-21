@@ -270,11 +270,65 @@ export async function getMonthlySeries(userId: string, year: number, month: numb
   return buckets;
 }
 
+export type GoalMovement = { id: string; date: Date; amount: number; note: string | null; auto: boolean };
+
+/**
+ * Metas com o valor guardado calculado conforme a origem:
+ * - ACCOUNT: saldo atual da conta vinculada (transferências para ela fazem a meta subir);
+ * - CATEGORY: soma dos lançamentos da categoria (e subcategorias) desde startDate,
+ *   mais eventuais aportes manuais (ex.: valor que já existia antes);
+ * - MANUAL: soma dos aportes registrados na própria meta.
+ * `recentAvg` é a média mensal dos últimos 3 meses (mês atual + 2 anteriores).
+ */
 export async function getGoals(userId: string) {
   const goals = await db.goal.findMany({
     where: { userId },
-    include: { contributions: { orderBy: { date: "desc" } } },
+    include: {
+      contributions: { orderBy: { date: "desc" } },
+      account: { select: { id: true, name: true, initialBalance: true } },
+      category: { select: { id: true, name: true, children: { select: { id: true } } } },
+    },
     orderBy: { createdAt: "asc" },
   });
-  return goals.map((g) => ({ ...g, saved: g.contributions.reduce((s, c) => s + c.amount, 0) }));
+  const now = new Date();
+  const windowStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1));
+  const manual = (g: (typeof goals)[number]): GoalMovement[] =>
+    g.contributions.map((c) => ({ id: c.id, date: c.date, amount: c.amount, note: c.note, auto: false }));
+
+  return Promise.all(
+    goals.map(async (g) => {
+      let movements: GoalMovement[];
+      let saved: number;
+      let source: string | null = null;
+
+      if (g.linkType === "ACCOUNT" && g.account) {
+        const txs = await db.transaction.findMany({
+          where: { userId, accountId: g.account.id },
+          select: { id: true, date: true, amount: true, description: true },
+          orderBy: { date: "desc" },
+        });
+        saved = g.account.initialBalance + txs.reduce((s, t) => s + t.amount, 0);
+        movements = txs.map((t) => ({ id: t.id, date: t.date, amount: t.amount, note: t.description, auto: true }));
+        source = `Saldo da conta ${g.account.name}`;
+      } else if (g.linkType === "CATEGORY" && g.category) {
+        const ids = [g.category.id, ...g.category.children.map((c) => c.id)];
+        const txs = await db.transaction.findMany({
+          where: { userId, categoryId: { in: ids }, date: { gte: g.startDate ?? g.createdAt } },
+          select: { id: true, date: true, amount: true, description: true },
+          orderBy: { date: "desc" },
+        });
+        // Despesa lançada na categoria = dinheiro guardado (por isso o sinal invertido)
+        const fromTxs = txs.map((t) => ({ id: t.id, date: t.date, amount: -t.amount, note: t.description, auto: true }));
+        movements = [...fromTxs, ...manual(g)].sort((a, b) => b.date.getTime() - a.date.getTime());
+        saved = movements.reduce((s, m) => s + m.amount, 0);
+        source = `Lançamentos em ${g.category.name}`;
+      } else {
+        movements = manual(g);
+        saved = movements.reduce((s, m) => s + m.amount, 0);
+      }
+
+      const recentAvg = Math.round(movements.filter((m) => m.date >= windowStart).reduce((s, m) => s + m.amount, 0) / 3);
+      return { ...g, saved, recentAvg, movements, source };
+    }),
+  );
 }

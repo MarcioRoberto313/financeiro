@@ -14,19 +14,19 @@ datasource db {
 // Valores monetários são guardados em centavos (Int) para evitar erro de arredondamento.
 
 model User {
-  id           String        @id @default(cuid())
-  name         String
-  email        String        @unique
-  passwordHash String
+  id             String               @id @default(cuid())
+  name           String
+  email          String               @unique
+  passwordHash   String
   /// Incrementado ao trocar a senha: invalida as sessões abertas em todos os aparelhos.
-  sessionVersion Int         @default(0)
-  createdAt    DateTime      @default(now())
-  accounts     Account[]
-  categories   Category[]
-  transactions Transaction[]
-  budgets      Budget[]
-  goals        Goal[]
-  resetTokens  PasswordResetToken[]
+  sessionVersion Int                  @default(0)
+  createdAt      DateTime             @default(now())
+  accounts       Account[]
+  categories     Category[]
+  transactions   Transaction[]
+  budgets        Budget[]
+  goals          Goal[]
+  resetTokens    PasswordResetToken[]
 }
 
 // Cadastro aguardando confirmação do e-mail. A conta (User) só é criada quando a
@@ -66,6 +66,7 @@ model Account {
   archived       Boolean       @default(false)
   createdAt      DateTime      @default(now())
   transactions   Transaction[]
+  goals          Goal[]
 
   @@index([userId])
 }
@@ -88,6 +89,7 @@ model Category {
   archived     Boolean       @default(false)
   transactions Transaction[]
   budgets      Budget[]
+  goals        Goal[]
 
   @@index([userId])
   @@index([parentId])
@@ -95,22 +97,22 @@ model Category {
 
 // amount com sinal: > 0 entrada, < 0 saída.
 model Transaction {
-  id          String    @id @default(cuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accountId   String
-  account     Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  categoryId  String?
-  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  date        DateTime
-  description String
-  amount      Int
-  notes       String?
-  fitId       String? // identificador do OFX, evita importar o mesmo lançamento duas vezes
-  importBatch String?
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId       String
+  account         Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  categoryId      String?
+  category        Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  date            DateTime
+  description     String
+  amount          Int
+  notes           String?
+  fitId           String? // identificador do OFX, evita importar o mesmo lançamento duas vezes
+  importBatch     String?
   /// Liga os dois lados de uma transferência (saída na origem e entrada no destino)
   transferGroupId String?
-  createdAt   DateTime  @default(now())
+  createdAt       DateTime  @default(now())
 
   @@unique([accountId, fitId])
   @@index([transferGroupId])
@@ -143,6 +145,14 @@ model Goal {
   color         String             @default("#10b981")
   createdAt     DateTime           @default(now())
   contributions GoalContribution[]
+  /// Como a meta é alimentada: MANUAL (aportes registrados nela), ACCOUNT (saldo de uma
+  /// conta) ou CATEGORY (soma dos lançamentos de uma categoria a partir de startDate)
+  linkType      String             @default("MANUAL")
+  accountId     String?
+  account       Account?           @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  categoryId    String?
+  category      Category?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  startDate     DateTime?
 
   @@index([userId])
 }
