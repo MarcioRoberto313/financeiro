@@ -92,7 +92,7 @@ export async function requestPasswordReset(_: FormState, formData: FormData): Pr
   if (recent) return done;
 
   const token = randomBytes(32).toString("base64url");
-  await db.$transaction([
+  const [, created] = await db.$transaction([
     db.passwordResetToken.deleteMany({ where: { userId: user.id } }),
     db.passwordResetToken.create({
       data: { userId: user.id, tokenHash: sha256(token), expiresAt: new Date(Date.now() + RESET_TTL_MS) },
@@ -100,7 +100,11 @@ export async function requestPasswordReset(_: FormState, formData: FormData): Pr
   ]);
   const mail = passwordResetEmail(user.name, `${await appUrl()}/redefinir-senha?token=${token}`);
   const sent = await sendEmail({ to: user.email, ...mail });
-  if (!sent.ok) return { error: "Não foi possível enviar o e-mail agora. Tente novamente em alguns minutos." };
+  if (!sent.ok) {
+    // Falhou: descarta o link para não travar a próxima tentativa com a mensagem de sucesso
+    await db.passwordResetToken.delete({ where: { id: created.id } });
+    return { error: "Não foi possível enviar o e-mail agora. Tente novamente em alguns minutos." };
+  }
   return done;
 }
 
