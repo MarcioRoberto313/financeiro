@@ -6,6 +6,21 @@ import { resetPassword } from "@/app/actions";
 
 export function ResetPasswordForm({ token }: { token: string }) {
   const [state, action, pending] = useActionState(resetPassword, undefined);
+
+  if (state?.ok) {
+    return (
+      <div className="card space-y-4">
+        <h1 className="text-xl font-semibold">Senha alterada</h1>
+        <p className="text-sm text-muted">
+          Por segurança, todos os aparelhos conectados à sua conta foram desconectados. Entre com a nova senha.
+        </p>
+        <Link href="/login" className="btn btn-primary w-full">
+          Entrar
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <form action={action} className="card space-y-4">
       <input type="hidden" name="token" value={token} />

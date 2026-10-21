@@ -18,6 +18,8 @@ model User {
   name         String
   email        String        @unique
   passwordHash String
+  /// Incrementado ao trocar a senha: invalida as sessões abertas em todos os aparelhos.
+  sessionVersion Int         @default(0)
   createdAt    DateTime      @default(now())
   accounts     Account[]
   categories   Category[]
@@ -25,6 +27,18 @@ model User {
   budgets      Budget[]
   goals        Goal[]
   resetTokens  PasswordResetToken[]
+}
+
+// Cadastro aguardando confirmação do e-mail. A conta (User) só é criada quando a
+// pessoa abre o link e confirma; pendências não confirmadas expiram em 24 horas.
+model PendingSignup {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  tokenHash    String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
 }
 
 // Recuperação de senha: guarda só o hash (SHA-256) do código enviado por e-mail.

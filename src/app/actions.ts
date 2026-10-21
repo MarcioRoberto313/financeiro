@@ -10,7 +10,7 @@ import { db } from "@/lib/db";
 import { createSession, deleteSession, requireUserId } from "@/lib/session";
 import { GROUP_ORDER, TRANSFER, type DreGroup } from "@/lib/constants";
 import { createDefaultCategories } from "@/lib/default-categories";
-import { passwordResetEmail, sendEmail } from "@/lib/email";
+import { passwordResetEmail, sendEmail, signupConfirmationEmail } from "@/lib/email";
 import { dateFromISO, parseMoney } from "@/lib/format";
 
 export type FormState = { error?: string; ok?: boolean; message?: string } | undefined;
@@ -22,37 +22,91 @@ const refreshAll = () => revalidatePath("/", "layout");
 export async function login(_: FormState, formData: FormData): Promise<FormState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
+  const remember = formData.get("remember") === "on";
   const user = await db.user.findUnique({ where: { email } });
   if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+    // Cadastro feito mas ainda não confirmado: explica em vez de dizer "senha inválida"
+    if (!user && (await db.pendingSignup.findUnique({ where: { email } }))) {
+      return { error: "Seu cadastro ainda não foi confirmado. Abra o link que enviamos para o seu e-mail." };
+    }
     return { error: "E-mail ou senha inválidos." };
   }
-  await createSession(user.id);
+  await createSession(user.id, user.sessionVersion, remember);
   redirect("/dashboard");
 }
 
-const registerSchema = z.object({
-  name: z.string().trim().min(2, "Informe seu nome."),
-  email: z.email("E-mail inválido.").transform((e) => e.toLowerCase()),
-  password: z.string().min(8, "A senha precisa ter pelo menos 8 caracteres."),
-});
+const registerSchema = z
+  .object({
+    name: z.string().trim().min(2, "Informe seu nome."),
+    email: z.email("E-mail inválido.").transform((e) => e.trim().toLowerCase()),
+    emailConfirm: z.string().transform((e) => e.trim().toLowerCase()),
+    password: z.string().min(8, "A senha precisa ter pelo menos 8 caracteres."),
+  })
+  .refine((d) => d.email === d.emailConfirm, { message: "Os e-mails não conferem. Digite o mesmo e-mail nos dois campos." });
 
+const SIGNUP_TTL_MS = 24 * 60 * 60 * 1000; // 24 horas
+
+/**
+ * Cadastro em duas etapas: aqui só guarda os dados como pendentes e envia o link de
+ * confirmação. A conta é criada em `confirmSignup`, quando a pessoa prova que o e-mail é dela.
+ */
 export async function register(_: FormState, formData: FormData): Promise<FormState> {
   const parsed = registerSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: parsed.error.issues[0].message };
   const { name, email, password } = parsed.data;
-  if (await db.user.findUnique({ where: { email } })) return { error: "Já existe uma conta com este e-mail." };
+  if (await db.user.findUnique({ where: { email } })) {
+    return { error: "Já existe uma conta com este e-mail. Use “Esqueci minha senha” se não lembrar a senha." };
+  }
 
-  const user = await db.user.create({
+  // Evita disparos repetidos para o mesmo e-mail
+  const recent = await db.pendingSignup.findUnique({ where: { email } });
+  if (recent && recent.createdAt > new Date(Date.now() - 2 * 60 * 1000)) {
+    return { error: "Acabamos de enviar um link para este e-mail. Aguarde 2 minutos para pedir outro." };
+  }
+
+  const token = randomBytes(32).toString("base64url");
+  await db.pendingSignup.deleteMany({ where: { OR: [{ email }, { expiresAt: { lt: new Date() } }] } });
+  const pending = await db.pendingSignup.create({
     data: {
       name,
       email,
       passwordHash: await bcrypt.hash(password, 10),
+      tokenHash: sha256(token),
+      expiresAt: new Date(Date.now() + SIGNUP_TTL_MS),
+    },
+  });
+  const mail = signupConfirmationEmail(name, `${await appUrl()}/confirmar-cadastro?token=${token}`);
+  const sent = await sendEmail({ to: email, ...mail });
+  if (!sent.ok) {
+    await db.pendingSignup.delete({ where: { id: pending.id } });
+    return { error: "Não foi possível enviar o e-mail de confirmação agora. Confira o endereço e tente de novo." };
+  }
+  return { ok: true, message: email };
+}
+
+/** Segunda etapa do cadastro: cria a conta a partir do link enviado por e-mail. */
+export async function confirmSignup(_: FormState, formData: FormData): Promise<FormState> {
+  const token = String(formData.get("token") ?? "");
+  const pending = token ? await db.pendingSignup.findUnique({ where: { tokenHash: sha256(token) } }) : null;
+  if (!pending || pending.expiresAt < new Date()) {
+    return { error: "Este link expirou ou já foi usado. Faça o cadastro novamente." };
+  }
+  if (await db.user.findUnique({ where: { email: pending.email } })) {
+    await db.pendingSignup.delete({ where: { id: pending.id } });
+    return { ok: true, message: "Esta conta já estava confirmada." };
+  }
+  const user = await db.user.create({
+    data: {
+      name: pending.name,
+      email: pending.email,
+      passwordHash: pending.passwordHash,
       accounts: { create: [{ name: "Conta principal", type: "CORRENTE" }] },
     },
   });
   await createDefaultCategories(db, user.id);
-  await createSession(user.id);
-  redirect("/dashboard");
+  await db.pendingSignup.delete({ where: { id: pending.id } });
+  // Sem login automático: a pessoa entra com e-mail e senha
+  return { ok: true, message: "Conta criada!" };
 }
 
 export async function logout() {
@@ -126,12 +180,17 @@ export async function resetPassword(_: FormState, formData: FormData): Promise<F
     return { error: "Este link expirou ou já foi usado. Peça um novo em “Esqueci minha senha”." };
   }
   await db.$transaction([
-    db.user.update({ where: { id: record.userId }, data: { passwordHash: await bcrypt.hash(password, 10) } }),
+    db.user.update({
+      where: { id: record.userId },
+      // sessionVersion + 1 derruba as sessões abertas em todos os aparelhos
+      data: { passwordHash: await bcrypt.hash(password, 10), sessionVersion: { increment: 1 } },
+    }),
     db.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
     db.passwordResetToken.deleteMany({ where: { userId: record.userId, NOT: { id: record.id } } }),
   ]);
-  await createSession(record.userId);
-  redirect("/dashboard");
+  // Sem login automático: a pessoa entra de novo com a senha nova
+  await deleteSession();
+  return { ok: true };
 }
 
 // ---------- Lançamentos ----------

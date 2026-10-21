@@ -86,6 +86,29 @@ Se você não pediu isso, ignore este e-mail: sua senha continua a mesma.`;
   return { subject: "Redefinir sua senha – Finanças", html, text };
 }
 
+export function signupConfirmationEmail(name: string, link: string) {
+  const first = name.split(" ")[0];
+  const text = `Olá, ${first}!
+
+Para concluir o seu cadastro no Finanças, confirme o seu e-mail abrindo o link abaixo (válido por 24 horas):
+
+${link}
+
+Se você não se cadastrou, ignore este e-mail: nenhuma conta será criada.`;
+  const html = `<!doctype html>
+<html lang="pt-BR"><body style="margin:0;background:#f5f6fa;font-family:Arial,Helvetica,sans-serif;color:#0f172a">
+  <div style="max-width:480px;margin:24px auto;background:#ffffff;border:1px solid #e4e7ef;border-radius:16px;padding:28px">
+    <p style="margin:0 0 16px;font-size:18px;font-weight:bold">Finanças</p>
+    <p style="margin:0 0 12px">Olá, ${escapeHtml(first)}!</p>
+    <p style="margin:0 0 20px;line-height:1.5">Falta só um passo para criar a sua conta: confirme que este e-mail é seu. O link vale por <b>24 horas</b>.</p>
+    <p style="margin:0 0 24px"><a href="${link}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:12px;font-weight:bold">Confirmar meu e-mail</a></p>
+    <p style="margin:0 0 8px;font-size:12px;color:#64748b">Se o botão não funcionar, copie e cole este endereço no navegador:<br>${link}</p>
+    <p style="margin:16px 0 0;font-size:12px;color:#64748b">Se você não se cadastrou, ignore este e-mail: nenhuma conta será criada.</p>
+  </div>
+</body></html>`;
+  return { subject: "Confirme seu cadastro – Finanças", html, text };
+}
+
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }

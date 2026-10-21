@@ -25,6 +25,13 @@ export default function LoginPage() {
         </div>
         <input className="input" id="password" name="password" type="password" autoComplete="current-password" required />
       </div>
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" name="remember" className="mt-0.5" />
+        <span>
+          Manter conectado neste dispositivo
+          <span className="block text-xs text-muted">Use só no seu computador ou celular pessoal. Sem marcar, a sessão termina ao fechar o navegador.</span>
+        </span>
+      </label>
       {state?.error && <p className="text-sm text-negative">{state.error}</p>}
       <button className="btn btn-primary w-full" disabled={pending}>
         {pending ? "Entrando…" : "Entrar"}
