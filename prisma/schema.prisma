@@ -108,9 +108,12 @@ model Transaction {
   notes       String?
   fitId       String? // identificador do OFX, evita importar o mesmo lançamento duas vezes
   importBatch String?
+  /// Liga os dois lados de uma transferência (saída na origem e entrada no destino)
+  transferGroupId String?
   createdAt   DateTime  @default(now())
 
   @@unique([accountId, fitId])
+  @@index([transferGroupId])
   @@index([userId, date])
   @@index([categoryId])
 }

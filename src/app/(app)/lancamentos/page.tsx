@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { Upload } from "lucide-react";
 import { requireUser } from "@/lib/session";
-import { getAccountsWithBalance, getCategories, getMonthTransactions } from "@/lib/data";
+import { getAccountsWithBalance, getCategories, getMonthTransactions, getTransferPairs } from "@/lib/data";
 import { getPeriod, param, type SearchParams } from "@/lib/period";
 import { categoryTreeOptions } from "@/lib/category-tree";
 import { formatDate, money, toISODate } from "@/lib/format";
@@ -39,9 +39,13 @@ async function Lancamentos({ searchParams }: { searchParams: SearchParams }) {
 
   const accountOpts = accounts.filter((a) => !a.archived).map((a) => ({ id: a.id, name: a.name }));
   const catOpts = categories.map((c) => ({ id: c.id, name: c.name, kind: c.kind, group: c.group, parentId: c.parentId }));
-  const entradas = txs.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-  const saidas = txs.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0);
-  const semCategoria = txs.filter((t) => !t.categoryId).length;
+  // Transferências só movem dinheiro entre as suas contas: ficam fora de entradas/saídas
+  const pairs = await getTransferPairs(user.id, [...new Set(txs.map((t) => t.transferGroupId).filter((g): g is string => !!g))]);
+  const movimentos = txs.filter((t) => !t.transferGroupId);
+  const transferencias = new Set(txs.map((t) => t.transferGroupId).filter(Boolean)).size;
+  const entradas = movimentos.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+  const saidas = movimentos.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0);
+  const semCategoria = movimentos.filter((t) => !t.categoryId).length;
   const current = { ano: String(year), mes: String(month), ...filters };
 
   return (
@@ -67,7 +71,13 @@ async function Lancamentos({ searchParams }: { searchParams: SearchParams }) {
           label="Saldo do período"
           value={money(entradas + saidas)}
           tone={entradas + saidas >= 0 ? "positive" : "negative"}
-          hint={semCategoria ? <span className="text-warning">{semCategoria} lançamento(s) sem categoria</span> : `${txs.length} lançamentos`}
+          hint={
+            semCategoria ? (
+              <span className="text-warning">{semCategoria} lançamento(s) sem categoria</span>
+            ) : (
+              `${movimentos.length} lançamentos${transferencias ? ` · ${transferencias} transferência(s) entre contas (fora dos totais)` : ""}`
+            )
+          }
         />
       </div>
 
@@ -111,12 +121,22 @@ async function Lancamentos({ searchParams }: { searchParams: SearchParams }) {
                   accountId: t.accountId,
                   categoryId: t.categoryId,
                   notes: t.notes,
+                  transfer: null,
                 };
+                const pair = t.transferGroupId ? pairs.get(t.transferGroupId) : undefined;
+                if (t.transferGroupId && pair) {
+                  tx.transfer = { groupId: t.transferGroupId, fromAccountId: pair.from.id, toAccountId: pair.to.id };
+                }
                 return (
                   <tr key={t.id} className="hover:bg-surface-2/60">
                     <td className="whitespace-nowrap text-muted">{formatDate(t.date)}</td>
                     <td>
                       <p className="font-medium">{t.description}</p>
+                      {pair && (
+                        <p className="text-xs text-primary">
+                          {pair.from.name} → {pair.to.name}
+                        </p>
+                      )}
                       {t.notes && <p className="text-xs text-muted">{t.notes}</p>}
                     </td>
                     <td>

@@ -252,8 +252,11 @@ export async function saveTransaction(_: FormState, formData: FormData): Promise
     notes: d.notes?.trim() || null,
   };
   if (d.id) {
-    const res = await db.transaction.updateMany({ where: { id: d.id, userId }, data });
-    if (res.count === 0) return { error: "Lançamento não encontrado." };
+    // Os lados de uma transferência só são editados juntos, pelo formulário de transferência
+    const current = await db.transaction.findFirst({ where: { id: d.id, userId }, select: { transferGroupId: true } });
+    if (!current) return { error: "Lançamento não encontrado." };
+    if (current.transferGroupId) return { error: "Este lançamento é uma transferência. Edite-o como transferência." };
+    await db.transaction.update({ where: { id: d.id }, data });
   } else {
     await db.transaction.create({ data: { ...data, userId } });
   }
@@ -261,16 +264,80 @@ export async function saveTransaction(_: FormState, formData: FormData): Promise
   return { ok: true };
 }
 
+/** Categoria de transferências do usuário (fora da DRE); cria se ainda não existir. */
+async function transferCategoryId(userId: string) {
+  const existing = await db.category.findFirst({
+    where: { userId, group: TRANSFER, parentId: null },
+    orderBy: { archived: "asc" },
+  });
+  if (existing) return existing.id;
+  const created = await db.category.create({
+    data: { userId, name: "Transferência entre contas", kind: TRANSFER, group: TRANSFER, color: "#94a3b8" },
+  });
+  return created.id;
+}
+
+const transferSchema = z
+  .object({
+    groupId: z.string().optional(),
+    replaceId: z.string().optional(),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida."),
+    description: z.string().trim().min(1, "Informe a descrição."),
+    amount: z.string(),
+    fromAccountId: z.string().min(1, "Escolha a conta de origem."),
+    toAccountId: z.string().min(1, "Escolha a conta de destino."),
+    notes: z.string().optional(),
+  })
+  .refine((d) => d.fromAccountId !== d.toAccountId, { message: "A conta de origem e a de destino precisam ser diferentes." });
+
+/**
+ * Transferência entre contas: grava os dois lados juntos (saída na origem, entrada no
+ * destino), ligados pelo mesmo transferGroupId, para o saldo nunca ficar com "perna aberta".
+ */
+export async function saveTransfer(_: FormState, formData: FormData): Promise<FormState> {
+  const userId = await requireUserId();
+  const parsed = transferSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const d = parsed.data;
+  const cents = parseMoney(d.amount);
+  if (cents === null || cents === 0) return { error: "Valor inválido." };
+  const value = Math.abs(cents);
+
+  const accounts = await db.account.findMany({ where: { userId, id: { in: [d.fromAccountId, d.toAccountId] } } });
+  if (accounts.length !== 2) return { error: "Conta não encontrada." };
+
+  const categoryId = await transferCategoryId(userId);
+  const common = { userId, date: dateFromISO(d.date), description: d.description, notes: d.notes?.trim() || null, categoryId };
+  const groupId = d.groupId || randomBytes(12).toString("base64url");
+
+  await db.$transaction([
+    // Editando: substitui os dois lados antigos pelos novos
+    ...(d.groupId ? [db.transaction.deleteMany({ where: { userId, transferGroupId: d.groupId } })] : []),
+    // Lançamento comum convertido em transferência: o original dá lugar ao par
+    ...(d.replaceId ? [db.transaction.deleteMany({ where: { id: d.replaceId, userId, transferGroupId: null } })] : []),
+    db.transaction.create({ data: { ...common, accountId: d.fromAccountId, amount: -value, transferGroupId: groupId } }),
+    db.transaction.create({ data: { ...common, accountId: d.toAccountId, amount: value, transferGroupId: groupId } }),
+  ]);
+  refreshAll();
+  return { ok: true };
+}
+
 export async function deleteTransaction(id: string) {
   const userId = await requireUserId();
-  await db.transaction.deleteMany({ where: { id, userId } });
+  const tx = await db.transaction.findFirst({ where: { id, userId }, select: { transferGroupId: true } });
+  if (!tx) return;
+  // Transferência: exclui os dois lados juntos
+  await db.transaction.deleteMany({
+    where: tx.transferGroupId ? { userId, transferGroupId: tx.transferGroupId } : { id, userId },
+  });
   refreshAll();
 }
 
 export async function setTransactionCategory(id: string, categoryId: string | null) {
   const userId = await requireUserId();
   if (categoryId && !(await db.category.findFirst({ where: { id: categoryId, userId } }))) return;
-  await db.transaction.updateMany({ where: { id, userId }, data: { categoryId } });
+  // A categoria dos lados de uma transferência é fixa
+  await db.transaction.updateMany({ where: { id, userId, transferGroupId: null }, data: { categoryId } });
   refreshAll();
 }
 

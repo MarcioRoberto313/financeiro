@@ -190,6 +190,22 @@ export function buildDre(matrix: YearMatrix, source: "actual" | "budget"): DreLi
   ];
 }
 
+/** Para cada transferência, as contas de origem (saída) e destino (entrada). */
+export async function getTransferPairs(userId: string, groupIds: string[]) {
+  if (!groupIds.length) return new Map<string, { from: { id: string; name: string }; to: { id: string; name: string } }>();
+  const legs = await db.transaction.findMany({
+    where: { userId, transferGroupId: { in: groupIds } },
+    select: { transferGroupId: true, amount: true, account: { select: { id: true, name: true } } },
+  });
+  const pairs = new Map<string, { from: { id: string; name: string }; to: { id: string; name: string } }>();
+  for (const id of groupIds) {
+    const from = legs.find((l) => l.transferGroupId === id && l.amount < 0)?.account;
+    const to = legs.find((l) => l.transferGroupId === id && l.amount > 0)?.account;
+    if (from && to) pairs.set(id, { from, to });
+  }
+  return pairs;
+}
+
 export async function getMonthTransactions(
   userId: string,
   year: number,

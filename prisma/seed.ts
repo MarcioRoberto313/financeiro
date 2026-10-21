@@ -91,8 +91,8 @@ async function main() {
         .filter((t) => t.accountId === cartao.id && t.amount < 0 && (t.date as Date).getUTCMonth() === m - 1 && (t.date as Date).getUTCFullYear() === y)
         .reduce((s, t) => s + t.amount, 0);
       const transf = cats["Transferência entre contas"];
-      txs.push({ userId: user.id, accountId: corrente.id, categoryId: transf, date: day(y, m, 28), description: "Pagamento fatura Cartão Visa", amount: -fatura });
-      txs.push({ userId: user.id, accountId: cartao.id, categoryId: transf, date: day(y, m, 28), description: "Pagamento recebido", amount: fatura });
+      txs.push({ userId: user.id, accountId: corrente.id, categoryId: transf, date: day(y, m, 28), description: "Pagamento fatura Cartão Visa", amount: -fatura, transferGroupId: `fatura-${y}-${m}` });
+      txs.push({ userId: user.id, accountId: cartao.id, categoryId: transf, date: day(y, m, 28), description: "Pagamento fatura Cartão Visa", amount: fatura, transferGroupId: `fatura-${y}-${m}` });
     }
   }
   await db.transaction.createMany({ data: txs });
