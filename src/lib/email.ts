@@ -1,12 +1,39 @@
 import "server-only";
+import nodemailer from "nodemailer";
+
+type Message = { to: string; subject: string; html: string; text: string };
 
 /**
- * Envio de e-mail pela API do Resend (https://resend.com).
- * Variáveis: RESEND_API_KEY e, opcionalmente, EMAIL_FROM.
- * Sem domínio verificado no Resend, use o remetente padrão onboarding@resend.dev
- * (nesse caso o Resend só entrega para o e-mail da própria conta Resend).
+ * Envio de e-mail, nesta ordem de preferência:
+ * 1. Gmail (SMTP) — GMAIL_USER + GMAIL_APP_PASSWORD (senha de app do Google, não a senha normal).
+ * 2. Resend (API) — RESEND_API_KEY e, opcionalmente, EMAIL_FROM. Sem domínio verificado,
+ *    o remetente onboarding@resend.dev só entrega para o e-mail da conta Resend.
+ * 3. Em desenvolvimento, sem nenhum dos dois, o conteúdo é mostrado no terminal.
  */
-export async function sendEmail({ to, subject, html, text }: { to: string; subject: string; html: string; text: string }) {
+export async function sendEmail(msg: Message) {
+  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) return sendWithGmail(msg);
+  return sendWithResend(msg);
+}
+
+async function sendWithGmail({ to, subject, html, text }: Message) {
+  const user = process.env.GMAIL_USER!;
+  try {
+    const transport = nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      // A senha de app vem com espaços ("abcd efgh ijkl mnop"); o Google aceita sem eles
+      auth: { user, pass: process.env.GMAIL_APP_PASSWORD!.replace(/\s+/g, "") },
+    });
+    await transport.sendMail({ from: `"Finanças" <${user}>`, to, subject, html, text });
+    return { ok: true as const };
+  } catch (err) {
+    console.error("Falha ao enviar e-mail pelo Gmail:", err instanceof Error ? err.message : err);
+    return { ok: false as const };
+  }
+}
+
+async function sendWithResend({ to, subject, html, text }: Message) {
   const key = process.env.RESEND_API_KEY;
   if (!key) {
     if (process.env.NODE_ENV !== "production") {
@@ -14,7 +41,7 @@ export async function sendEmail({ to, subject, html, text }: { to: string; subje
       console.log(`\n[email de teste] Para: ${to}\nAssunto: ${subject}\n${text}\n`);
       return { ok: true as const };
     }
-    console.error("RESEND_API_KEY não configurada: e-mail não enviado.");
+    console.error("Nenhum serviço de e-mail configurado (GMAIL_USER/GMAIL_APP_PASSWORD ou RESEND_API_KEY).");
     return { ok: false as const };
   }
   const res = await fetch("https://api.resend.com/emails", {
