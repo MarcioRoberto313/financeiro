@@ -1,9 +1,10 @@
-import { Suspense } from "react";
+import { Suspense, type ReactNode } from "react";
 import Link from "next/link";
-import { PiggyBank, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { CircleCheck, OctagonAlert, PiggyBank, TrendingDown, TrendingUp, TriangleAlert, Wallet } from "lucide-react";
 import { requireUser } from "@/lib/session";
-import { getAccountsWithBalance, getGoals, getMonthTransactions, getMonthlySeries, getRecentTransactions, getYearMatrix } from "@/lib/data";
+import { getAccountsWithBalance, getGoals, getMonthTransactions, getMonthlySeries, getRecentTransactions, getSpendingHistory, getYearMatrix } from "@/lib/data";
 import { getPeriod, param, type SearchParams } from "@/lib/period";
+import { monthHealth, yearHealth, type BudgetHealth, type HealthItem } from "@/lib/budget-health";
 import { MONTHS_SHORT, formatDate, money, pct, yearRange } from "@/lib/format";
 import { ACCOUNT_TYPES } from "@/lib/constants";
 import { Dot, PageHeader, PageSkeleton, Progress, StatCard } from "@/components/ui";
@@ -27,8 +28,9 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
   const { year, month } = getPeriod(sp);
   // Visão mensal (padrão) ou anual (soma de janeiro a dezembro do ano escolhido)
   const anual = param(sp, "visao") === "ano";
-  const [matrix, series, accounts, goals, recent] = await Promise.all([
+  const [matrix, history, series, accounts, goals, recent] = await Promise.all([
     getYearMatrix(user.id, year),
+    getSpendingHistory(user.id),
     anual ? getMonthlySeries(user.id, year, 12) : getMonthlySeries(user.id, year, month),
     getAccountsWithBalance(user.id),
     getGoals(user.id),
@@ -58,6 +60,8 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
     .map((c) => ({ name: c.name, value: pick(matrix.actual(c.id)), color: c.color, budget: pick(matrix.budget(c.id)) }))
     .filter((c) => c.value > 0 || c.budget > 0)
     .sort((a, b) => b.value - a.value);
+
+  const health = anual ? yearHealth(matrix, history) : monthHealth(matrix, month, history);
 
   const chart = series.map((b) => ({
     label: `${MONTHS_SHORT[b.m - 1]}/${String(b.y).slice(2)}`,
@@ -116,6 +120,8 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
           hint={`${accounts.filter((a) => !a.archived).length} contas`}
         />
       </div>
+
+      <BudgetHealthCard health={health} periodo={periodo} href={`/acompanhamento?ano=${year}&mes=${month}${anual ? "&visao=ano" : ""}`} />
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
         <section className="card xl:col-span-2">
@@ -241,5 +247,97 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
         </section>
       </div>
     </>
+  );
+}
+
+const BASIS: Record<HealthItem["basis"], string> = {
+  historico: "pela média dos últimos 3 meses",
+  ritmo: "no ritmo atual",
+  lancado: "",
+};
+
+/** O que já estourou, o que pode estourar e onde sobra mais, comparado ao orçado. */
+function BudgetHealthCard({ health, periodo, href }: { health: BudgetHealth; periodo: string; href: string }) {
+  if (!health.hasBudget) return null;
+  const columns: {
+    title: string;
+    icon: ReactNode;
+    items: HealthItem[];
+    empty: string;
+    tone: string;
+    amount: (i: HealthItem) => string;
+    detail: (i: HealthItem) => string;
+  }[] = [
+    {
+      title: "Já estourou",
+      icon: <OctagonAlert size={16} className="text-negative" />,
+      items: health.over,
+      empty: "Nada estourado.",
+      tone: "text-negative",
+      amount: (i) => `+${money(i.actual - i.budget)}`,
+      detail: (i) => (i.budget ? `${money(i.actual)} de ${money(i.budget)}` : `${money(i.actual)} sem orçamento`),
+    },
+    {
+      title: "Pode estourar",
+      icon: <TriangleAlert size={16} className="text-warning" />,
+      items: health.atRisk,
+      empty: `Nenhum risco previsto no ${periodo}.`,
+      tone: "text-warning",
+      amount: (i) => `+${money(i.projected - i.budget)}`,
+      detail: (i) => `previsto ${money(i.projected)} de ${money(i.budget)}`,
+    },
+    {
+      title: "Maior folga",
+      icon: <CircleCheck size={16} className="text-positive" />,
+      items: health.slack,
+      empty: "Sem folga relevante.",
+      tone: "text-positive",
+      amount: (i) => money(i.budget - i.projected),
+      detail: (i) => `${i.basis === "lancado" ? "sobrou" : "deve sobrar"} de ${money(i.budget)}`,
+    },
+  ];
+  return (
+    <section className="card mt-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-semibold">Alertas do orçamento</h2>
+        <Link href={href} className="text-sm text-primary">Ver detalhes</Link>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        {columns.map((col) => (
+          <div key={col.title} className="rounded-xl bg-surface-2 p-3">
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium">
+              {col.icon}
+              {col.title}
+              {col.items.length > 0 && <span className="text-muted">({col.items.length})</span>}
+            </h3>
+            {col.items.length ? (
+              <ul className="space-y-2.5 text-sm">
+                {col.items.slice(0, 4).map((i) => (
+                  <li key={i.id} title={BASIS[i.basis] ? `Previsão ${BASIS[i.basis]}` : undefined}>
+                    <div className="flex items-center gap-2">
+                      <Dot color={i.color} />
+                      <span className="min-w-0 flex-1 truncate font-medium">{i.name}</span>
+                      <span className={`shrink-0 tabular-nums ${col.tone}`}>{col.amount(i)}</span>
+                    </div>
+                    <p className="truncate pl-4 text-xs text-muted">
+                      {i.parent ? `${i.parent} · ` : ""}
+                      {col.detail(i)}
+                    </p>
+                  </li>
+                ))}
+                {col.items.length > 4 && <li className="text-xs text-muted">e mais {col.items.length - 4}…</li>}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted">{col.empty}</p>
+            )}
+          </div>
+        ))}
+      </div>
+      {health.atRisk.length > 0 && (
+        <p className="mt-3 text-xs text-muted">
+          A previsão soma ao realizado o que você costuma gastar no restante do {periodo}, pela média dos últimos 3 meses.
+        </p>
+      )}
+    </section>
   );
 }

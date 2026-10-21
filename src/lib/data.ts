@@ -332,3 +332,35 @@ export async function getGoals(userId: string) {
     }),
   );
 }
+
+/**
+ * Gasto médio por linha de despesa nos 3 meses completos antes de `now`: o total do mês e
+ * o que costuma sair depois do dia de hoje. Serve para prever o resto do mês sem projetar
+ * de novo contas que já foram pagas (aluguel no dia 10, assinatura no dia 18…).
+ * As chaves seguem as linhas da matriz: subcategoria, ou "categoria::geral".
+ */
+export async function getSpendingHistory(userId: string, now = new Date()) {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const today = now.getUTCDate();
+  const [categories, txs] = await Promise.all([
+    db.category.findMany({ where: { userId, kind: "DESPESA" }, select: { id: true, parentId: true } }),
+    db.transaction.findMany({
+      where: { userId, categoryId: { not: null }, date: { gte: new Date(Date.UTC(y, m - 3, 1)), lt: new Date(Date.UTC(y, m, 1)) } },
+      select: { categoryId: true, amount: true, date: true },
+    }),
+  ]);
+  const parents = new Set(categories.map((c) => c.parentId).filter(Boolean));
+  const expense = new Set(categories.map((c) => c.id));
+  const monthly = new Map<string, number>();
+  const rest = new Map<string, number>();
+  for (const t of txs) {
+    if (!expense.has(t.categoryId!)) continue;
+    const key = parents.has(t.categoryId!) ? t.categoryId + GENERAL : t.categoryId!;
+    const value = -t.amount / 3;
+    monthly.set(key, (monthly.get(key) ?? 0) + value);
+    if (t.date.getUTCDate() > today) rest.set(key, (rest.get(key) ?? 0) + value);
+  }
+  return { monthly, rest };
+}
+export type SpendingHistory = Awaited<ReturnType<typeof getSpendingHistory>>;
