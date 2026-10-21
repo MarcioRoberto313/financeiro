@@ -2,7 +2,17 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // Checagem otimista: só confere se o cookie existe. A validação real da sessão
 // acontece no servidor (requireUser) perto dos dados.
-const PUBLIC = ["/login", "/cadastro", "/confirmar-cadastro", "/esqueci-senha", "/redefinir-senha"];
+const PUBLIC = [
+  "/login",
+  "/cadastro",
+  "/confirmar-cadastro",
+  "/esqueci-senha",
+  "/redefinir-senha",
+  "/privacidade",
+  "/excluir-conta",
+  "/conta-excluida",
+  "/.well-known",
+];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

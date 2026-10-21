@@ -1,4 +1,6 @@
 import { Suspense } from "react";
+import Link from "next/link";
+import { DeleteAccountSection } from "@/components/delete-account";
 import { requireUser } from "@/lib/session";
 import { getAccountsWithBalance, getCategories } from "@/lib/data";
 import { ACCOUNT_TYPES, GROUP_LABEL, GROUP_ORDER, TRANSFER } from "@/lib/constants";
@@ -118,6 +120,13 @@ async function Configuracoes() {
           );
         })}
       </section>
+
+      <div className="xl:col-span-2">
+        <DeleteAccountSection />
+        <p className="mt-3 text-center text-xs text-muted">
+          <Link href="/privacidade" className="underline">Política de privacidade</Link>
+        </p>
+      </div>
     </div>
   );
 }

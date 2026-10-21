@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Logo } from "@/components/logo";
 
 export default function AuthLayout({ children }: LayoutProps<"/">) {
@@ -8,6 +9,9 @@ export default function AuthLayout({ children }: LayoutProps<"/">) {
           <Logo />
         </div>
         {children}
+        <p className="mt-6 text-center text-xs text-muted">
+          <Link href="/privacidade" className="underline">Política de privacidade</Link>
+        </p>
       </div>
     </div>
   );

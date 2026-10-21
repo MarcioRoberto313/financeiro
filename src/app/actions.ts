@@ -114,6 +114,28 @@ export async function logout() {
   redirect("/login");
 }
 
+/**
+ * Exclusão definitiva da conta do usuário e de todos os dados (exigida pela Google Play
+ * e pela App Store para apps com cadastro). Pede a senha e a palavra EXCLUIR.
+ */
+export async function deleteMyAccount(_: FormState, formData: FormData): Promise<FormState> {
+  const userId = await requireUserId();
+  const password = String(formData.get("password") ?? "");
+  const confirmation = String(formData.get("confirmation") ?? "").trim().toUpperCase();
+  if (confirmation !== "EXCLUIR") return { error: "Digite EXCLUIR para confirmar." };
+
+  const user = await db.user.findUnique({ where: { id: userId } });
+  if (!user || !(await bcrypt.compare(password, user.passwordHash))) return { error: "Senha incorreta." };
+
+  // Contas, categorias, lançamentos, orçamentos, metas e links de senha caem em cascata
+  await db.$transaction([
+    db.pendingSignup.deleteMany({ where: { email: user.email } }),
+    db.user.delete({ where: { id: user.id } }),
+  ]);
+  await deleteSession();
+  redirect("/conta-excluida");
+}
+
 // ---------- Recuperação de senha ----------
 
 const RESET_TTL_MS = 60 * 60 * 1000; // 1 hora
