@@ -4,6 +4,7 @@ import { Upload } from "lucide-react";
 import { requireUser } from "@/lib/session";
 import { getAccountsWithBalance, getCategories, getMonthTransactions } from "@/lib/data";
 import { getPeriod, param, type SearchParams } from "@/lib/period";
+import { categoryTreeOptions } from "@/lib/category-tree";
 import { formatDate, money, toISODate } from "@/lib/format";
 import { Dot, PageHeader, PageSkeleton, StatCard } from "@/components/ui";
 import { PeriodPicker } from "@/components/period-picker";
@@ -12,7 +13,6 @@ import {
   InlineCategory,
   NewTransactionButton,
   TransactionRowActions,
-  categoryTreeOptions,
   type TxValue,
 } from "@/components/transaction-form";
 
