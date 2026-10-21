@@ -420,20 +420,21 @@ export async function suggestCategories(descriptions: string[]) {
 export async function saveBudget(year: number, entries: { categoryId: string; month: number; amount: number }[]) {
   const userId = await requireUserId();
   const validCats = new Set((await db.category.findMany({ where: { userId }, select: { id: true } })).map((c) => c.id));
-  const ops = entries
-    .filter((e) => validCats.has(e.categoryId) && e.month >= 1 && e.month <= 12 && Number.isInteger(e.amount))
-    .map((e) =>
-      e.amount > 0
-        ? db.budget.upsert({
-            where: { userId_categoryId_year_month: { userId, categoryId: e.categoryId, year, month: e.month } },
-            create: { userId, categoryId: e.categoryId, year, month: e.month, amount: e.amount },
-            update: { amount: e.amount },
-          })
-        : db.budget.deleteMany({ where: { userId, categoryId: e.categoryId, year, month: e.month } }),
-    );
-  await db.$transaction(ops);
+  const valid = entries.filter(
+    (e) => validCats.has(e.categoryId) && e.month >= 1 && e.month <= 12 && Number.isInteger(e.amount),
+  );
+  // Duas operações em vez de uma por célula: apaga o orçamento dessas categorias/meses
+  // e grava de novo só os valores positivos (muito mais rápido com o banco distante)
+  const categoryIds = [...new Set(valid.map((e) => e.categoryId))];
+  const months = [...new Set(valid.map((e) => e.month))];
+  await db.$transaction([
+    db.budget.deleteMany({ where: { userId, year, categoryId: { in: categoryIds }, month: { in: months } } }),
+    db.budget.createMany({
+      data: valid.filter((e) => e.amount > 0).map((e) => ({ userId, categoryId: e.categoryId, year, month: e.month, amount: e.amount })),
+    }),
+  ]);
   refreshAll();
-  return { saved: ops.length };
+  return { saved: valid.length };
 }
 
 /** Preenche o orçamento do ano com a média mensal realizada no ano anterior. */

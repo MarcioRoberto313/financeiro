@@ -49,6 +49,22 @@ export function BudgetEditor({
     setDirty(true);
   };
 
+  // Replicar: copia os valores de um mês (todas as linhas) para os meses seguintes ou para o ano todo
+  const [sourceMonth, setSourceMonth] = useState(0);
+  const replicate = (target: "seguintes" | "todos") => {
+    const months = target === "todos" ? [...Array(12).keys()] : [...Array(12).keys()].filter((m) => m > sourceMonth);
+    if (!months.length) return setMsg("Dezembro não tem meses seguintes no ano.");
+    const label = target === "todos" ? "todos os meses" : `os meses seguintes a ${MONTHS_SHORT[sourceMonth]}`;
+    if (!confirm(`Copiar os valores de ${MONTHS_SHORT[sourceMonth]} para ${label}? Os valores atuais desses meses serão substituídos.`)) return;
+    setValues((s) =>
+      Object.fromEntries(
+        Object.entries(s).map(([id, vals]) => [id, vals.map((v, m) => (months.includes(m) ? vals[sourceMonth] : v))]),
+      ),
+    );
+    setDirty(true);
+    setMsg(`Valores de ${MONTHS_SHORT[sourceMonth]} copiados. Clique em “Salvar orçamento” para gravar.`);
+  };
+
   const groupTotals = useMemo(() => {
     const t: Partial<Record<DreGroup, number[]>> = {};
     for (const c of categories) {
@@ -118,7 +134,7 @@ export function BudgetEditor({
           Use <Copy size={12} className="inline" /> para repetir o primeiro valor da linha em todos os meses.
         </p>
         <div className="flex items-center gap-2">
-          {msg && <span className="text-sm text-positive">{msg}</span>}
+          {msg && <span className="max-w-xs text-sm text-positive">{msg}</span>}
           <button className="btn btn-ghost" onClick={fromPrevious} disabled={pending}>
             Usar média de {year - 1}
           </button>
@@ -126,6 +142,29 @@ export function BudgetEditor({
             {pending ? "Salvando…" : "Salvar orçamento"}
           </button>
         </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-2/50 px-4 py-3 text-sm">
+        <Copy size={15} className="text-primary" />
+        <span className="font-medium">Replicar valores de</span>
+        <select
+          className="input w-auto py-1.5"
+          value={sourceMonth}
+          onChange={(e) => setSourceMonth(Number(e.target.value))}
+          aria-label="Mês de origem"
+        >
+          {MONTHS_SHORT.map((m, i) => (
+            <option key={m} value={i}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <span className="text-muted">para</span>
+        <button className="btn btn-ghost px-3 py-1.5" onClick={() => replicate("seguintes")} disabled={pending}>
+          os meses seguintes
+        </button>
+        <button className="btn btn-ghost px-3 py-1.5" onClick={() => replicate("todos")} disabled={pending}>
+          todos os meses
+        </button>
       </div>
       <div className="overflow-x-auto">
         <table className="table text-xs">

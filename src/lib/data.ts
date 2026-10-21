@@ -190,6 +190,16 @@ export function buildDre(matrix: YearMatrix, source: "actual" | "budget"): DreLi
   ];
 }
 
+/** Lançamentos mais recentes dentro de um período (usado na visão anual do Dashboard). */
+export async function getRecentTransactions(userId: string, range: { gte: Date; lt: Date }, take = 6) {
+  return db.transaction.findMany({
+    where: { userId, date: range },
+    include: { account: { select: { name: true, color: true } }, category: { select: { name: true, color: true, parent: { select: { name: true } } } } },
+    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    take,
+  });
+}
+
 /** Para cada transferência, as contas de origem (saída) e destino (entrada). */
 export async function getTransferPairs(userId: string, groupIds: string[]) {
   if (!groupIds.length) return new Map<string, { from: { id: string; name: string }; to: { id: string; name: string } }>();

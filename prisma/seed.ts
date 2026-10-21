@@ -35,21 +35,21 @@ async function main() {
     ["Salário", "Salário", 850000, 5, corrente.id],
     ["Aluguel", "Aluguel", -220000, 10, corrente.id],
     ["Condomínio", "Condomínio", -65000, 10, corrente.id],
-    ["Energia elétrica", "Energia elétrica", -24000, 15, corrente.id],
+    ["Luz", "Conta de luz", -24000, 15, corrente.id],
     ["Internet", "Internet", -11990, 12, corrente.id],
     ["Gás", "Conta de gás", -8500, 16, corrente.id],
     ["Plano de saúde", "Plano de saúde", -68000, 8, corrente.id],
-    ["Educação", "Curso de inglês", -42000, 7, corrente.id],
-    ["Assinaturas", "Streaming", -5590, 18, cartao.id],
+    ["Cursos", "Curso de inglês", -42000, 7, corrente.id],
+    ["Assinaturas de streaming", "Streaming", -5590, 18, cartao.id],
     ["Financiamentos", "Parcela do carro", -98000, 20, corrente.id],
-    ["Aportes", "Aporte reserva", -80000, 6, corrente.id],
+    ["Reserva de emergência", "Aporte reserva", -80000, 6, corrente.id],
   ];
   // Gastos variáveis: [descrições possíveis → (sub)categoria], valor médio, quantidade no mês
   const variable: [Record<string, string>, number, number][] = [
-    [{ Supermercado: "Supermercado", Padaria: "Supermercado", iFood: "Delivery", Restaurante: "Restaurantes" }, 18000, 7],
-    [{ Combustível: "Combustível", Uber: "App de transporte", Estacionamento: "Transporte" }, 15000, 4],
-    [{ Cinema: "Lazer", Bar: "Lazer", Show: "Lazer" }, 12000, 2],
-    [{ Amazon: "Compras", Farmácia: "Farmácia", "Loja de roupas": "Compras" }, 16000, 2],
+    [{ Supermercado: "Supermercado", Padaria: "Supermercado", iFood: "Delivery", Restaurante: "Refeições fora de casa" }, 18000, 7],
+    [{ Combustível: "Combustível", Uber: "Aplicativos de viagem", Estacionamento: "Estacionamento" }, 15000, 4],
+    [{ Cinema: "Cinema", Bar: "Restaurantes", Show: "Passeios" }, 12000, 2],
+    [{ Farmácia: "Farmácia", Drogaria: "Farmácia", Exame: "Exames" }, 16000, 2],
   ];
 
   const txs: Prisma.TransactionCreateManyInput[] = [];
@@ -101,12 +101,12 @@ async function main() {
   const year = today.getUTCFullYear();
   const plan: Record<string, number> = {
     "Salário": 850000, "Renda extra": 50000, "Rendimentos": 14000,
-    "Aluguel": 220000, "Condomínio": 65000, "Energia elétrica": 24000, "Internet": 12000, "Gás": 9000,
-    "Plano de saúde": 68000, "Farmácia": 8000, "Educação": 42000, "Assinaturas": 6000,
-    "Supermercado": 70000, "Delivery": 20000, "Restaurantes": 25000,
-    "Combustível": 30000, "App de transporte": 15000, "Transporte": 8000,
-    "Lazer": 25000, "Compras": 25000, "Outros": 10000,
-    "Financiamentos": 98000, "Aportes": 100000,
+    "Aluguel": 220000, "Condomínio": 65000, "Luz": 24000, "Internet": 12000, "Gás": 9000,
+    "Plano de saúde": 68000, "Farmácia": 8000, "Exames": 5000, "Cursos": 42000, "Assinaturas de streaming": 6000,
+    "Supermercado": 70000, "Delivery": 20000, "Refeições fora de casa": 25000,
+    "Combustível": 30000, "Aplicativos de viagem": 15000, "Estacionamento": 8000,
+    "Cinema": 8000, "Restaurantes": 12000, "Passeios": 10000,
+    "Financiamentos": 98000, "Reserva de emergência": 100000,
   };
   await db.budget.createMany({
     data: Object.entries(plan).flatMap(([cat, amount]) =>

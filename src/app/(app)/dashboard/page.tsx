@@ -2,12 +2,13 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { PiggyBank, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { requireUser } from "@/lib/session";
-import { getAccountsWithBalance, getGoals, getMonthTransactions, getMonthlySeries, getYearMatrix } from "@/lib/data";
-import { getPeriod, type SearchParams } from "@/lib/period";
-import { MONTHS_SHORT, formatDate, money, pct } from "@/lib/format";
+import { getAccountsWithBalance, getGoals, getMonthTransactions, getMonthlySeries, getRecentTransactions, getYearMatrix } from "@/lib/data";
+import { getPeriod, param, type SearchParams } from "@/lib/period";
+import { MONTHS_SHORT, formatDate, money, pct, yearRange } from "@/lib/format";
 import { ACCOUNT_TYPES } from "@/lib/constants";
 import { Dot, PageHeader, PageSkeleton, Progress, StatCard } from "@/components/ui";
 import { PeriodPicker } from "@/components/period-picker";
+import { UrlTabs } from "@/components/url-filters";
 import { CategoryDonut, IncomeExpenseChart } from "@/components/charts";
 
 export const metadata = { title: "Dashboard" };
@@ -22,20 +23,25 @@ export default function DashboardPage({ searchParams }: { searchParams: SearchPa
 
 async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireUser();
-  const { year, month } = getPeriod(await searchParams);
+  const sp = await searchParams;
+  const { year, month } = getPeriod(sp);
+  // Visão mensal (padrão) ou anual (soma de janeiro a dezembro do ano escolhido)
+  const anual = param(sp, "visao") === "ano";
   const [matrix, series, accounts, goals, recent] = await Promise.all([
     getYearMatrix(user.id, year),
-    getMonthlySeries(user.id, year, month),
+    anual ? getMonthlySeries(user.id, year, 12) : getMonthlySeries(user.id, year, month),
     getAccountsWithBalance(user.id),
     getGoals(user.id),
-    getMonthTransactions(user.id, year, month),
+    anual ? getRecentTransactions(user.id, yearRange(year)) : getMonthTransactions(user.id, year, month),
   ]);
-  const m = month - 1;
+  const months = anual ? [...Array(12).keys()] : [month - 1];
+  const pick = (arr: number[]) => months.reduce((s, i) => s + arr[i], 0);
+  const periodo = anual ? "ano" : "mês";
 
   const sum = (kind: "RECEITA" | "DESPESA", src: "actual" | "budget", skipInvest = false) =>
     matrix.categories
       .filter((c) => c.kind === kind && !(skipInvest && c.group === "INVESTIMENTO"))
-      .reduce((s, c) => s + matrix[src](c.id)[m], 0);
+      .reduce((s, c) => s + pick(matrix[src](c.id)), 0);
 
   const receitas = sum("RECEITA", "actual");
   const receitasOrc = sum("RECEITA", "budget");
@@ -43,13 +49,13 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
   const despesasOrc = sum("DESPESA", "budget", true);
   const investido = matrix.categories
     .filter((c) => c.group === "INVESTIMENTO")
-    .reduce((s, c) => s + matrix.actual(c.id)[m], 0);
+    .reduce((s, c) => s + pick(matrix.actual(c.id)), 0);
   const resultado = receitas - despesas;
   const saldoContas = accounts.filter((a) => !a.archived).reduce((s, a) => s + a.balance, 0);
 
   const despesasPorCategoria = matrix.categories
     .filter((c) => c.kind === "DESPESA" && c.group !== "INVESTIMENTO")
-    .map((c) => ({ name: c.name, value: matrix.actual(c.id)[m], color: c.color, budget: matrix.budget(c.id)[m] }))
+    .map((c) => ({ name: c.name, value: pick(matrix.actual(c.id)), color: c.color, budget: pick(matrix.budget(c.id)) }))
     .filter((c) => c.value > 0 || c.budget > 0)
     .sort((a, b) => b.value - a.value);
 
@@ -64,8 +70,21 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
     <>
       <PageHeader
         title={`Olá, ${user.name.split(" ")[0]}`}
-        subtitle="Resumo do mês e evolução das suas finanças."
-        actions={<PeriodPicker year={year} month={month} />}
+        subtitle={anual ? `Resumo do ano de ${year} e evolução mês a mês.` : "Resumo do mês e evolução das suas finanças."}
+        actions={
+          <>
+            <UrlTabs
+              name="visao"
+              value={anual ? "ano" : "mes"}
+              current={{ ano: String(year), mes: String(month), visao: anual ? "ano" : "mes" }}
+              options={[
+                { value: "mes", label: "Mês" },
+                { value: "ano", label: "Ano" },
+              ]}
+            />
+            <PeriodPicker year={year} month={month} mode={anual ? "year" : "month"} extra={{ visao: anual ? "ano" : undefined }} />
+          </>
+        }
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -84,7 +103,7 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
           hint={despesasOrc ? `${pct(despesas / despesasOrc)} do orçado (${money(despesasOrc)})` : "Sem orçamento"}
         />
         <StatCard
-          label="Resultado do mês"
+          label={`Resultado do ${periodo}`}
           value={money(resultado)}
           tone={resultado >= 0 ? "positive" : "negative"}
           icon={<PiggyBank size={18} className="text-muted" />}
@@ -100,7 +119,7 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
         <section className="card xl:col-span-2">
-          <h2 className="mb-4 font-semibold">Receitas x despesas — últimos 12 meses</h2>
+          <h2 className="mb-4 font-semibold">{anual ? `Receitas x despesas — ${year}` : "Receitas x despesas — últimos 12 meses"}</h2>
           <IncomeExpenseChart data={chart} />
         </section>
         <section className="card">
@@ -119,7 +138,7 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
               </ul>
             </>
           ) : (
-            <p className="py-10 text-center text-sm text-muted">Nenhuma despesa neste mês.</p>
+            <p className="py-10 text-center text-sm text-muted">Nenhuma despesa neste {periodo}.</p>
           )}
         </section>
       </div>
@@ -127,8 +146,8 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
         <section className="card xl:col-span-2">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-semibold">Orçado x realizado no mês</h2>
-            <Link href={`/acompanhamento?ano=${year}&mes=${month}`} className="text-sm text-primary">
+            <h2 className="font-semibold">Orçado x realizado no {periodo}</h2>
+            <Link href={`/acompanhamento?ano=${year}&mes=${month}${anual ? "&visao=ano" : ""}`} className="text-sm text-primary">
               Ver detalhes
             </Link>
           </div>
@@ -154,7 +173,7 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
             })}
             {!despesasPorCategoria.some((c) => c.budget > 0) && (
               <p className="text-sm text-muted">
-                Nenhum orçamento para este mês. <Link href="/orcamento" className="text-primary">Criar orçamento</Link>
+                Nenhum orçamento para este {periodo}. <Link href="/orcamento" className="text-primary">Criar orçamento</Link>
               </p>
             )}
           </ul>
@@ -202,7 +221,7 @@ async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
                 <span className={`tabular-nums ${t.amount >= 0 ? "text-positive" : ""}`}>{money(t.amount)}</span>
               </li>
             ))}
-            {!recent.length && <p className="py-6 text-center text-sm text-muted">Nenhum lançamento neste mês.</p>}
+            {!recent.length && <p className="py-6 text-center text-sm text-muted">Nenhum lançamento neste {periodo}.</p>}
           </ul>
         </section>
         <section className="card">
