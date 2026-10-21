@@ -83,21 +83,67 @@ export function parseDate(s: string): string | null {
 
 export type CsvMapping = { date: number; description: number; amount: number; debit: number; credit: number };
 
+const normalize = (s: string) => (s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+
 /** Adivinha as colunas pelo cabeçalho. -1 = não usada. */
 export function guessMapping(header: string[]): CsvMapping {
-  const h = header.map((x) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, ""));
-  const find = (...keys: string[]) => h.findIndex((x) => keys.some((k) => x.includes(k)));
-  return {
-    date: find("data", "date"),
-    description: find("descri", "historico", "lancamento", "estabelecimento", "memo", "title", "titulo"),
-    amount: find("valor", "amount", "value", "quantia"),
-    debit: find("debito", "saida"),
-    credit: find("credito", "entrada"),
+  const h = header.map(normalize);
+  const used = new Set<number>();
+  // Procura as chaves em ordem de prioridade, sem reaproveitar colunas
+  // (ex.: "Data Lançamento" é a data, não a descrição).
+  const find = (...keys: string[]) => {
+    for (const k of keys) {
+      const i = h.findIndex((x, idx) => !used.has(idx) && x.includes(k));
+      if (i >= 0) {
+        used.add(i);
+        return i;
+      }
+    }
+    return -1;
   };
+  const date = find("data", "date", "dt.");
+  const debit = find("debito", "saida");
+  const credit = find("credito", "entrada");
+  const amount = find("valor", "amount", "value", "quantia", "montante");
+  const description = find("descri", "historico", "estabelecimento", "memo", "titulo", "title", "lancamento", "detalhe", "complemento");
+  return { date, description, amount, debit, credit };
 }
 
-export function rowsFromCSV(table: string[][], map: CsvMapping, hasHeader: boolean): ParsedRow[] {
-  const body = hasHeader ? table.slice(1) : table;
+const isMapped = (m: CsvMapping) => m.date >= 0 && (m.amount >= 0 || m.debit >= 0 || m.credit >= 0);
+
+/**
+ * Extratos costumam ter linhas de título antes do cabeçalho (banco, agência, período).
+ * Procura nas primeiras linhas a que tem colunas de data e valor. -1 = sem cabeçalho.
+ */
+export function findHeaderRow(table: string[][]) {
+  for (let i = 0; i < Math.min(table.length, 30); i++) {
+    if (isMapped(guessMapping(table[i]))) return i;
+  }
+  return -1;
+}
+
+/** Sem cabeçalho: deduz as colunas pelo conteúdo (datas, valores e o texto mais longo). */
+export function guessMappingFromData(table: string[][]): CsvMapping {
+  const sample = table.filter((r) => r.some((c) => parseDate(c ?? ""))).slice(0, 30);
+  const cols = Math.max(0, ...sample.map((r) => r.length));
+  const score = (fn: (v: string) => boolean) =>
+    Array.from({ length: cols }, (_, c) => sample.filter((r) => fn(r[c] ?? "")).length);
+  const dates = score((v) => !!parseDate(v));
+  const date = dates.indexOf(Math.max(...dates));
+  const nums = score((v) => !parseDate(v) && /\d/.test(v) && parseMoney(v) !== null);
+  nums[date] = -1;
+  const best = Math.max(...nums);
+  // Entre colunas numéricas igualmente frequentes, a primeira costuma ser o valor (a última, o saldo).
+  const amount = best > 0 ? nums.indexOf(best) : -1;
+  const texts = Array.from({ length: cols }, (_, c) =>
+    c === date || c === amount ? -1 : sample.reduce((s, r) => s + (parseMoney(r[c] ?? "") === null ? (r[c] ?? "").length : 0), 0),
+  );
+  const description = texts.indexOf(Math.max(...texts));
+  return { date, description, amount, debit: -1, credit: -1 };
+}
+
+export function rowsFromCSV(table: string[][], map: CsvMapping, headerRow: number): ParsedRow[] {
+  const body = table.slice(headerRow + 1);
   const out: ParsedRow[] = [];
   for (const r of body) {
     const date = map.date >= 0 ? parseDate(r[map.date] ?? "") : null;
@@ -113,4 +159,38 @@ export function rowsFromCSV(table: string[][], map: CsvMapping, hasHeader: boole
     out.push({ date, description: (map.description >= 0 ? r[map.description] : "") || "(sem descrição)", amount });
   }
   return out;
+}
+
+// ---------- Excel ----------
+
+/** Lê a primeira aba de um .xlsx/.xls como tabela de textos (datas em dd/mm/aaaa). */
+export async function readSpreadsheet(file: File): Promise<string[][]> {
+  const XLSX = await import("xlsx");
+  const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellNF: true });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  if (!sheet?.["!ref"]) return [];
+  const range = XLSX.utils.decode_range(sheet["!ref"]);
+  const table: string[][] = [];
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const row: string[] = [];
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cell = sheet[XLSX.utils.encode_cell({ r, c })];
+      if (!cell || cell.v === undefined || cell.v === null) {
+        row.push("");
+      } else if (cell.t === "n" && cell.z && XLSX.SSF.is_date(cell.z)) {
+        // Converte o número de série do Excel sem passar por fuso horário
+        const d = XLSX.SSF.parse_date_code(cell.v as number);
+        row.push(`${String(d.d).padStart(2, "0")}/${String(d.m).padStart(2, "0")}/${d.y}`);
+      } else if (cell.t === "d" && cell.v instanceof Date) {
+        const d = cell.v;
+        row.push(`${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`);
+      } else if (cell.t === "n") {
+        row.push(String(cell.v)); // número puro, com ponto decimal
+      } else {
+        row.push(String(cell.w ?? cell.v).trim());
+      }
+    }
+    if (row.some((v) => v !== "")) table.push(row);
+  }
+  return table;
 }

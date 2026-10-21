@@ -6,9 +6,12 @@ import { useMemo, useState, useTransition } from "react";
 import { importTransactions, suggestCategories } from "@/app/actions";
 import { formatDate, money } from "@/lib/format";
 import {
+  findHeaderRow,
   guessMapping,
+  guessMappingFromData,
   parseOFX,
   readFileText,
+  readSpreadsheet,
   rowsFromCSV,
   splitCSV,
   type CsvMapping,
@@ -17,11 +20,20 @@ import {
 import { CategorySelect, type CategoryOption, type Option } from "./transaction-form";
 
 type Row = ParsedRow & { selected: boolean; categoryId: string | null };
+type Sheet = { table: string[][]; map: CsvMapping; headerRow: number };
+
+/** Monta o mapeamento inicial: cabeçalho encontrado, ou dedução pelo conteúdo. */
+function prepareSheet(table: string[][]): Sheet {
+  const headerRow = findHeaderRow(table);
+  return headerRow >= 0
+    ? { table, headerRow, map: guessMapping(table[headerRow]) }
+    : { table, headerRow: -1, map: guessMappingFromData(table) };
+}
 
 export function Importer({ accounts, categories }: { accounts: Option[]; categories: CategoryOption[] }) {
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [fileName, setFileName] = useState("");
-  const [csv, setCsv] = useState<{ table: string[][]; map: CsvMapping; hasHeader: boolean } | null>(null);
+  const [csv, setCsv] = useState<Sheet | null>(null);
   const [ofxRows, setOfxRows] = useState<ParsedRow[] | null>(null);
   const [invert, setInvert] = useState(false);
   const [overrides, setOverrides] = useState<Record<number, Partial<Row>>>({});
@@ -31,7 +43,7 @@ export function Importer({ accounts, categories }: { accounts: Option[]; categor
   const [pending, start] = useTransition();
 
   const parsed: ParsedRow[] = useMemo(() => {
-    const base = ofxRows ?? (csv ? rowsFromCSV(csv.table, csv.map, csv.hasHeader) : []);
+    const base = ofxRows ?? (csv ? rowsFromCSV(csv.table, csv.map, csv.headerRow) : []);
     return invert ? base.map((r) => ({ ...r, amount: -r.amount })) : base;
   }, [csv, ofxRows, invert]);
 
@@ -50,23 +62,35 @@ export function Importer({ accounts, categories }: { accounts: Option[]; categor
     setError(null);
     setOverrides({});
     setFileName(file.name);
-    const text = await readFileText(file);
-    if (/\.ofx$/i.test(file.name) || /<OFX>/i.test(text)) {
-      const list = parseOFX(text);
-      if (!list.length) return setError("Nenhum lançamento encontrado no OFX.");
-      setCsv(null);
-      setOfxRows(list);
-      refreshSuggestions(list);
-    } else {
-      const table = splitCSV(text);
-      if (table.length < 1) return setError("Arquivo vazio.");
-      const map = guessMapping(table[0]);
-      const next = { table, map, hasHeader: map.date >= 0 || map.amount >= 0 || map.description >= 0 };
-      if (!next.hasHeader) next.map = { date: 0, description: 1, amount: 2, debit: -1, credit: -1 };
-      setOfxRows(null);
-      setCsv(next);
-      refreshSuggestions(rowsFromCSV(next.table, next.map, next.hasHeader));
+    setCsv(null);
+    setOfxRows(null);
+    try {
+      if (/\.xlsx?$/i.test(file.name)) {
+        const table = await readSpreadsheet(file);
+        if (!table.length) return setError("A planilha está vazia.");
+        loadSheet(prepareSheet(table));
+        return;
+      }
+      const text = await readFileText(file);
+      if (/\.ofx$/i.test(file.name) || /<OFX>/i.test(text)) {
+        const list = parseOFX(text);
+        if (!list.length) return setError("Nenhum lançamento encontrado no OFX.");
+        setOfxRows(list);
+        refreshSuggestions(list);
+      } else {
+        const table = splitCSV(text);
+        if (!table.length) return setError("Arquivo vazio.");
+        loadSheet(prepareSheet(table));
+      }
+    } catch {
+      setError("Não foi possível ler o arquivo. Use um extrato OFX, uma planilha do Excel (.xlsx) ou um CSV.");
     }
+  }
+
+  function loadSheet(next: Sheet) {
+    setCsv(next);
+    setOverrides({});
+    refreshSuggestions(rowsFromCSV(next.table, next.map, next.headerRow));
   }
 
   const selected = rows.filter((r) => r.selected);
@@ -89,7 +113,13 @@ export function Importer({ accounts, categories }: { accounts: Option[]; categor
     });
   }
 
-  const header = csv ? (csv.hasHeader ? csv.table[0] : csv.table[0].map((_, i) => `Coluna ${i + 1}`)) : [];
+  const width = csv ? Math.max(...csv.table.slice(0, 40).map((r) => r.length)) : 0;
+  const header = csv
+    ? Array.from({ length: width }, (_, i) => {
+        const name = csv.headerRow >= 0 ? csv.table[csv.headerRow][i] : "";
+        return name ? `${name} (col. ${i + 1})` : `Coluna ${i + 1}`;
+      })
+    : [];
   const colSelect = (key: keyof CsvMapping, label: string) =>
     csv && (
       <div>
@@ -97,17 +127,12 @@ export function Importer({ accounts, categories }: { accounts: Option[]; categor
         <select
           className="input"
           value={csv.map[key]}
-          onChange={(e) => {
-            const next = { ...csv, map: { ...csv.map, [key]: Number(e.target.value) } };
-            setCsv(next);
-            setOverrides({});
-            refreshSuggestions(rowsFromCSV(next.table, next.map, next.hasHeader));
-          }}
+          onChange={(e) => loadSheet({ ...csv, map: { ...csv.map, [key]: Number(e.target.value) } })}
         >
           <option value={-1}>—</option>
           {header.map((h, i) => (
             <option key={i} value={i}>
-              {h || `Coluna ${i + 1}`}
+              {h}
             </option>
           ))}
         </select>
@@ -130,14 +155,17 @@ export function Importer({ accounts, categories }: { accounts: Option[]; categor
         <label className="flex cursor-pointer items-center gap-3 rounded-xl border-2 border-dashed border-border p-4 hover:border-primary">
           <FileUp className="text-primary" />
           <div className="text-sm">
-            <p className="font-medium">{fileName || "Escolha um arquivo CSV ou OFX"}</p>
-            <p className="text-muted">Extrato do banco (OFX) ou planilha salva como CSV.</p>
+            <p className="font-medium">{fileName || "Escolha um arquivo: Excel, CSV ou OFX"}</p>
+            <p className="text-muted">Planilha do Excel (.xlsx), extrato do banco (OFX) ou CSV.</p>
           </div>
           <input
             type="file"
-            accept=".csv,.ofx,.txt"
+            accept=".xlsx,.xls,.csv,.ofx,.txt"
             className="hidden"
-            onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
+            onChange={(e) => {
+              if (e.target.files?.[0]) onFile(e.target.files[0]);
+              e.target.value = ""; // permite escolher o mesmo arquivo de novo
+            }}
           />
         </label>
       </div>
@@ -154,28 +182,69 @@ export function Importer({ accounts, categories }: { accounts: Option[]; categor
 
       {csv && (
         <div className="card">
-          <h2 className="mb-3 font-semibold">Colunas do CSV</h2>
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <h2 className="mb-1 font-semibold">Colunas da planilha</h2>
+          <p className="mb-3 text-sm text-muted">Confira se cada campo aponta para a coluna certa do arquivo.</p>
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <div>
+              <label className="label">Linha do cabeçalho</label>
+              <select
+                className="input"
+                value={csv.headerRow}
+                onChange={(e) => {
+                  const headerRow = Number(e.target.value);
+                  loadSheet({
+                    ...csv,
+                    headerRow,
+                    map: headerRow >= 0 ? guessMapping(csv.table[headerRow]) : guessMappingFromData(csv.table),
+                  });
+                }}
+              >
+                <option value={-1}>Sem cabeçalho</option>
+                {csv.table.slice(0, 30).map((_, i) => (
+                  <option key={i} value={i}>
+                    Linha {i + 1}
+                  </option>
+                ))}
+              </select>
+            </div>
             {colSelect("date", "Data")}
             {colSelect("description", "Descrição")}
             {colSelect("amount", "Valor (com sinal)")}
             {colSelect("debit", "Débito (se separado)")}
             {colSelect("credit", "Crédito (se separado)")}
           </div>
-          <label className="mt-3 flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={csv.hasHeader}
-              onChange={(e) => setCsv({ ...csv, hasHeader: e.target.checked })}
-            />
-            A primeira linha é cabeçalho
-          </label>
+
+          {rows.length === 0 && (
+            <div className="mt-4 rounded-xl border border-warning/50 bg-warning/5 p-3 text-sm">
+              <p className="font-medium text-warning">Nenhum lançamento reconhecido ainda.</p>
+              <p className="text-muted">
+                Ajuste a coluna de <b>Data</b> e a de <b>Valor</b> (ou Débito/Crédito) acima. Veja o início do arquivo:
+              </p>
+              <div className="mt-2 overflow-x-auto">
+                <table className="table text-xs">
+                  <tbody>
+                    {csv.table.slice(0, 8).map((r, i) => (
+                      <tr key={i} className={i === csv.headerRow ? "font-semibold" : ""}>
+                        <td className="text-muted">{i + 1}</td>
+                        {Array.from({ length: width }, (_, c) => (
+                          <td key={c} className="whitespace-nowrap">
+                            {r[c]}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {rows.length > 0 && (
         <div className="card p-0">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
+          {/* Fica visível ao rolar a página (abaixo do cabeçalho fixo no celular) */}
+          <div className="sticky top-14 z-20 flex flex-wrap items-center justify-between gap-3 rounded-t-2xl border-b border-border bg-surface p-4 lg:top-0">
             <div className="text-sm">
               <span className="font-medium">{selected.length}</span> de {rows.length} selecionados · saldo{" "}
               <span className={total >= 0 ? "text-positive" : "text-negative"}>{money(total)}</span>
