@@ -24,6 +24,20 @@ model User {
   transactions Transaction[]
   budgets      Budget[]
   goals        Goal[]
+  resetTokens  PasswordResetToken[]
+}
+
+// Recuperação de senha: guarda só o hash (SHA-256) do código enviado por e-mail.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 // type: CORRENTE | POUPANCA | CARTAO | CARTEIRA | INVESTIMENTO

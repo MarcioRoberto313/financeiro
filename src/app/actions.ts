@@ -1,6 +1,8 @@
 "use server";
 
+import { createHash, randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
@@ -8,6 +10,7 @@ import { db } from "@/lib/db";
 import { createSession, deleteSession, requireUserId } from "@/lib/session";
 import { GROUP_ORDER, TRANSFER, type DreGroup } from "@/lib/constants";
 import { createDefaultCategories } from "@/lib/default-categories";
+import { passwordResetEmail, sendEmail } from "@/lib/email";
 import { dateFromISO, parseMoney } from "@/lib/format";
 
 export type FormState = { error?: string; ok?: boolean; message?: string } | undefined;
@@ -55,6 +58,76 @@ export async function register(_: FormState, formData: FormData): Promise<FormSt
 export async function logout() {
   await deleteSession();
   redirect("/login");
+}
+
+// ---------- Recuperação de senha ----------
+
+const RESET_TTL_MS = 60 * 60 * 1000; // 1 hora
+const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+/** Endereço público do app, usado no link do e-mail (nunca vem da requisição em produção). */
+async function appUrl() {
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  const h = await headers();
+  return `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host")}`;
+}
+
+export async function requestPasswordReset(_: FormState, formData: FormData): Promise<FormState> {
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  if (!z.email().safeParse(email).success) return { error: "Informe um e-mail válido." };
+  // A resposta é sempre a mesma, exista a conta ou não, para não revelar quem está cadastrado
+  const done: FormState = {
+    ok: true,
+    message: "Se houver uma conta com esse e-mail, enviamos um link para criar uma nova senha. Confira também a caixa de spam.",
+  };
+
+  const user = await db.user.findUnique({ where: { email } });
+  if (!user) return done;
+
+  // Evita disparos repetidos: no máximo um e-mail a cada 2 minutos por conta
+  const recent = await db.passwordResetToken.findFirst({
+    where: { userId: user.id, createdAt: { gt: new Date(Date.now() - 2 * 60 * 1000) } },
+  });
+  if (recent) return done;
+
+  const token = randomBytes(32).toString("base64url");
+  await db.$transaction([
+    db.passwordResetToken.deleteMany({ where: { userId: user.id } }),
+    db.passwordResetToken.create({
+      data: { userId: user.id, tokenHash: sha256(token), expiresAt: new Date(Date.now() + RESET_TTL_MS) },
+    }),
+  ]);
+  const mail = passwordResetEmail(user.name, `${await appUrl()}/redefinir-senha?token=${token}`);
+  const sent = await sendEmail({ to: user.email, ...mail });
+  if (!sent.ok) return { error: "Não foi possível enviar o e-mail agora. Tente novamente em alguns minutos." };
+  return done;
+}
+
+const resetSchema = z
+  .object({
+    token: z.string().min(20, "Link inválido."),
+    password: z.string().min(8, "A senha precisa ter pelo menos 8 caracteres."),
+    confirm: z.string(),
+  })
+  .refine((d) => d.password === d.confirm, { message: "As senhas não conferem." });
+
+export async function resetPassword(_: FormState, formData: FormData): Promise<FormState> {
+  const parsed = resetSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const { token, password } = parsed.data;
+
+  const record = await db.passwordResetToken.findUnique({ where: { tokenHash: sha256(token) } });
+  if (!record || record.usedAt || record.expiresAt < new Date()) {
+    return { error: "Este link expirou ou já foi usado. Peça um novo em “Esqueci minha senha”." };
+  }
+  await db.$transaction([
+    db.user.update({ where: { id: record.userId }, data: { passwordHash: await bcrypt.hash(password, 10) } }),
+    db.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+    db.passwordResetToken.deleteMany({ where: { userId: record.userId, NOT: { id: record.id } } }),
+  ]);
+  await createSession(record.userId);
+  redirect("/dashboard");
 }
 
 // ---------- Lançamentos ----------
