@@ -258,7 +258,19 @@ const BASIS: Record<HealthItem["basis"], string> = {
 
 /** O que já estourou, o que pode estourar e onde sobra mais, comparado ao orçado. */
 function BudgetHealthCard({ health, periodo, href }: { health: BudgetHealth; periodo: string; href: string }) {
-  if (!health.hasBudget) return null;
+  if (!health.hasBudget)
+    return (
+      <section className="card mt-4 flex flex-wrap items-center gap-3">
+        <TriangleAlert size={18} className="shrink-0 text-muted" />
+        <div className="min-w-0 flex-1">
+          <h2 className="font-semibold">Alertas do orçamento</h2>
+          <p className="text-sm text-muted">
+            Cadastre o orçamento do {periodo} para ver o que já estourou, o que pode estourar e onde há folga.
+          </p>
+        </div>
+        <Link href="/orcamento" className="btn btn-primary">Criar orçamento</Link>
+      </section>
+    );
   const columns: {
     title: string;
     icon: ReactNode;
