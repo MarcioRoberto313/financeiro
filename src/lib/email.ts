@@ -109,6 +109,29 @@ Se você não se cadastrou, ignore este e-mail: nenhuma conta será criada.`;
   return { subject: "Confirme seu cadastro – Finanças", html, text };
 }
 
+/** Aviso ao administrador de que alguém confirmou o cadastro. */
+export function newUserNoticeEmail(name: string, email: string, totalUsers: number) {
+  const when = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
+  const text = `Novo cadastro no Finanças
+
+Nome: ${name}
+E-mail: ${email}
+Confirmado em: ${when}
+
+Total de contas no app: ${totalUsers}`;
+  const html = `<!doctype html>
+<html lang="pt-BR"><body style="margin:0;background:#f5f6fa;font-family:Arial,Helvetica,sans-serif;color:#0f172a">
+  <div style="max-width:480px;margin:24px auto;background:#ffffff;border:1px solid #e4e7ef;border-radius:16px;padding:28px">
+    <p style="margin:0 0 16px;font-size:18px;font-weight:bold">Novo cadastro no Finanças</p>
+    <p style="margin:0 0 6px"><b>Nome:</b> ${escapeHtml(name)}</p>
+    <p style="margin:0 0 6px"><b>E-mail:</b> ${escapeHtml(email)}</p>
+    <p style="margin:0 0 16px"><b>Confirmado em:</b> ${when}</p>
+    <p style="margin:0;font-size:13px;color:#64748b">Total de contas no app: <b>${totalUsers}</b></p>
+  </div>
+</body></html>`;
+  return { subject: `Novo cadastro: ${name} – Finanças`, html, text };
+}
+
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }

@@ -10,7 +10,7 @@ import { db } from "@/lib/db";
 import { createSession, deleteSession, requireUserId } from "@/lib/session";
 import { GROUP_ORDER, TRANSFER, type DreGroup } from "@/lib/constants";
 import { createDefaultCategories } from "@/lib/default-categories";
-import { passwordResetEmail, sendEmail, signupConfirmationEmail } from "@/lib/email";
+import { newUserNoticeEmail, passwordResetEmail, sendEmail, signupConfirmationEmail } from "@/lib/email";
 import { dateFromISO, parseMoney } from "@/lib/format";
 
 export type FormState = { error?: string; ok?: boolean; message?: string } | undefined;
@@ -84,6 +84,17 @@ export async function register(_: FormState, formData: FormData): Promise<FormSt
   return { ok: true, message: email };
 }
 
+/** Avisa o administrador (ADMIN_EMAIL, ou CONTACT_EMAIL) de um cadastro novo; falha no envio não impede o cadastro. */
+async function notifyAdminOfSignup(name: string, email: string) {
+  const to = (process.env.ADMIN_EMAIL || process.env.CONTACT_EMAIL || "").trim();
+  if (!to) return;
+  try {
+    await sendEmail({ to, ...newUserNoticeEmail(name, email, await db.user.count()) });
+  } catch {
+    // Só um aviso: o cadastro já foi concluído
+  }
+}
+
 /** Segunda etapa do cadastro: cria a conta a partir do link enviado por e-mail. */
 export async function confirmSignup(_: FormState, formData: FormData): Promise<FormState> {
   const token = String(formData.get("token") ?? "");
@@ -105,6 +116,7 @@ export async function confirmSignup(_: FormState, formData: FormData): Promise<F
   });
   await createDefaultCategories(db, user.id);
   await db.pendingSignup.delete({ where: { id: pending.id } });
+  await notifyAdminOfSignup(user.name, user.email);
   // Sem login automático: a pessoa entra com e-mail e senha
   return { ok: true, message: "Conta criada!" };
 }
